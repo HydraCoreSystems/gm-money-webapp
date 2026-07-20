@@ -87,6 +87,9 @@ function handleApiRequest_(e) {
       case "createTransaction":
         return jsonOutput_(apiCreateTransaction_(payload));
 
+      case "getRegister":
+        return jsonOutput_(apiGetRegister_(payload));
+
       default:
         return jsonError_(
           'Unknown action: "' + action + '".',
@@ -347,4 +350,98 @@ function apiCreateTransaction_(payload) {
   } finally {
     lock.releaseLock();
   }
+}
+
+
+/* ============================================================
+   getRegister
+============================================================ */
+
+/**
+ * Reuses Register.gs's existing merge/dedup/running-balance logic
+ * verbatim (buildRegisterEntries_, applyRegisterRunningBalance_,
+ * getLatestBalanceHistoryValue_) rather than reimplementing it —
+ * that logic was originally a full afternoon of debugging to get
+ * right (duplicate rows, wrong balances) and is the same code the
+ * Sheets-side Register tab uses.
+ */
+function apiGetRegister_(payload) {
+  const accountName = String(payload.account || "").trim();
+
+  if (!accountName) {
+    return {
+      ok: false,
+      code: "VALIDATION_ERROR",
+      error: "Choose an account."
+    };
+  }
+
+  const manual = getManualTransactionsSheet_();
+  const source = getTillerTransactionsSheet_();
+  const entries = buildRegisterEntries_(manual, source, accountName);
+
+  let bankBalance;
+
+  try {
+    bankBalance = getLatestBalanceHistoryValue_(accountName);
+  } catch (err) {
+    // Manual-only account with no Tiller sync history — start from 0
+    // rather than fail the whole request.
+    bankBalance = 0;
+  }
+
+  const projectedBalance = entries.length > 0
+    ? applyRegisterRunningBalance_(entries, bankBalance)
+    : bankBalance;
+
+  const statusFilter = String(payload.status || "All").trim();
+  const ENTRY_LIMIT = 150;
+
+  const filteredEntries = entries
+    .slice()
+    .sort(function(a, b) {
+      const dateA = new Date(a.date).getTime();
+      const dateB = new Date(b.date).getTime();
+      return dateA !== dateB ? dateB - dateA : 0; // newest first, matches Sheets Register
+    })
+    .filter(function(entry) {
+      return statusFilter === "All" || entry.status === statusFilter;
+    });
+
+  // The balance math above needs the FULL history (the backward pass
+  // derives the implied starting balance from every cleared entry ever
+  // recorded), but this account has 2 years of Tiller-synced history —
+  // thousands of rows, a multi-MB payload if returned whole. Only the
+  // most recent window is actually useful to look at, so the response
+  // is capped here, after the balance calculation, not before it.
+  const displayEntries = filteredEntries
+    .slice(0, ENTRY_LIMIT)
+    .map(function(entry) {
+      return {
+        date: entry.date instanceof Date
+          ? Utilities.formatDate(entry.date, Session.getScriptTimeZone(), "yyyy-MM-dd")
+          : String(entry.date),
+        payee: entry.payee,
+        category: entry.category,
+        subcategory: entry.subcategory,
+        paymentMethod: entry.paymentMethod,
+        amount: entry.amount,
+        runningBalance: entry.runningBalance,
+        status: entry.status,
+        source: entry.source,
+        notes: entry.notes
+      };
+    });
+
+  return {
+    ok: true,
+    data: {
+      account: accountName,
+      bankBalance: bankBalance,
+      projectedBalance: projectedBalance,
+      entries: displayEntries,
+      totalCount: filteredEntries.length,
+      truncated: filteredEntries.length > ENTRY_LIMIT
+    }
+  };
 }
