@@ -261,3 +261,4 @@ function normalizeBacklogDate_(value) {
   date.setHours(0, 0, 0, 0);
   return date;
 }
+

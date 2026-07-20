@@ -729,3 +729,4 @@ function formatDashboardTimestamp_(date) {
     "MMM d, yyyy h:mm a"
   );
 }
+

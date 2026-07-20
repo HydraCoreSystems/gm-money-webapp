@@ -429,3 +429,4 @@ function applySubcategoryCascade_(category, subcategoryRange) {
     subcategoryRange.clearContent();
   }
 }
+

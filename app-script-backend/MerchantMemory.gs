@@ -50,22 +50,15 @@ function getMerchantMemorySheet_() {
     ss.getSheetByName(GM_MERCHANT_MEMORY.SHEET);
 
   if (!sheet) {
-
     sheet =
       ss.insertSheet(GM_MERCHANT_MEMORY.SHEET);
+  }
 
-    sheet
-      .getRange(
-        1,
-        1,
-        1,
-        GM_MERCHANT_MEMORY.HEADERS.length
-      )
-      .setValues([
-        GM_MERCHANT_MEMORY.HEADERS
-      ]);
+  ensureSheetHeaders_(sheet, GM_MERCHANT_MEMORY.HEADERS);
 
-    sheet.setFrozenRows(1);
+  sheet.setFrozenRows(1);
+
+  if (!sheet.isSheetHidden()) {
     sheet.hideSheet();
   }
 
@@ -796,3 +789,4 @@ function merchantMemoryStats_(){
 /* ============================================================
    End MerchantMemory.gs
 ============================================================ */
+

@@ -784,3 +784,4 @@ function normalizeMerchantManagerSearch_(value) {
     .toLowerCase()
     .replace(/\s+/g, " ");
 }
+

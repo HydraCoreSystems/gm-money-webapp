@@ -1108,3 +1108,4 @@ function formatRegisterTimestamp_(date) {
     "MMM d, yyyy h:mm a"
   );
 }
+

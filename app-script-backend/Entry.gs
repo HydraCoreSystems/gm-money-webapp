@@ -1249,3 +1249,4 @@ function createManualTransactionId_() {
 
   return "MAN-" + timestamp + "-" + randomPart;
 }
+

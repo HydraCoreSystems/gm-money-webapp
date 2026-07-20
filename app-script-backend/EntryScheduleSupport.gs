@@ -13,3 +13,4 @@ function ensureManualTransactionScheduleColumns_() {
 
   ensureSheetHeaders_(sheet, requiredHeaders);
 }
+
