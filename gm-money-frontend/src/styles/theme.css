@@ -230,11 +230,81 @@ body {
 
 .gm-register-row {
   display: flex;
-  align-items: center;
-  gap: 0.75rem;
+  flex-direction: column;
+  gap: 0.5rem;
   padding: 0.65rem 0.75rem;
   border: 1px solid var(--gm-border);
   border-radius: 8px;
+}
+
+.gm-register-row__top {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+}
+
+.gm-register-row__error {
+  margin: 0;
+}
+
+.gm-register-row__actions {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  flex-wrap: wrap;
+  padding-top: 0.4rem;
+  border-top: 1px solid var(--gm-border);
+}
+
+.gm-register-row__actions select {
+  padding: 0.4rem 0.5rem;
+  border: 1px solid var(--gm-border);
+  border-radius: 6px;
+  background: var(--gm-surface);
+  color: var(--gm-text);
+  font-size: 0.85rem;
+}
+
+.gm-link-button {
+  background: none;
+  border: none;
+  color: var(--gm-primary);
+  font-size: 0.85rem;
+  font-weight: 600;
+  cursor: pointer;
+  padding: 0.2rem 0.1rem;
+}
+
+.gm-link-button:hover:not(:disabled) {
+  text-decoration: underline;
+}
+
+.gm-link-button:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.gm-edit-form {
+  max-width: none;
+}
+
+.gm-edit-form__actions {
+  display: flex;
+  gap: 0.5rem;
+}
+
+.gm-edit-form__actions .gm-button {
+  flex: 1;
+}
+
+.gm-button--secondary {
+  background: var(--gm-surface);
+  color: var(--gm-text);
+  border: 1px solid var(--gm-border);
+}
+
+.gm-button--secondary:not(:disabled):hover {
+  background: var(--gm-surface-muted);
 }
 
 .gm-register-row__main {

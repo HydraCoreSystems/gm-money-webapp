@@ -36,6 +36,7 @@ export type ApiResult<T> =
 export type RegisterStatus = "Uncleared" | "Cleared" | "Reconciled";
 
 export type RegisterEntry = {
+  transactionId: string;
   date: string;
   payee: string;
   category: string;
@@ -55,4 +56,57 @@ export type RegisterData = {
   entries: RegisterEntry[];
   totalCount: number;
   truncated: boolean;
+};
+
+export type UpdateTransactionPayload = CreateTransactionPayload & {
+  transactionId: string;
+};
+
+export type UpdateTransactionResult = {
+  transactionId: string;
+  amount: number;
+  type: "Income" | "Expense";
+};
+
+export type DeleteTransactionResult = {
+  transactionId: string;
+};
+
+export type UpdateTransactionStatusResult = {
+  transactionId: string;
+  status: RegisterStatus;
+};
+
+export type MatchTransactionPayload = {
+  transactionId: string;
+  bankDate: string;
+  bankDescription: string;
+  bankAmount: number;
+  bankAccount: string;
+};
+
+export type MatchTransactionResult = {
+  transactionId: string;
+  bankKey: string;
+};
+
+export type ReviewTransaction = {
+  sourceRow: number;
+  date: string;
+  description: string;
+  amount: number;
+  account: string;
+  transactionKey: string;
+};
+
+export type ApproveTransactionPayload = {
+  sourceRow: number;
+  category: string;
+  subcategory: string;
+  notes: string;
+};
+
+export type ApproveTransactionResult = {
+  sourceRow: number;
+  transactionKey: string;
 };

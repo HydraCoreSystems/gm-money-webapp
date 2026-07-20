@@ -3,9 +3,10 @@ import { clearStoredPassword, getStoredPassword, storeEnteredBy, storePassword }
 import { PasswordGate } from "./auth/PasswordGate";
 import { TransactionEntryForm } from "./features/transaction-entry/TransactionEntryForm";
 import { RegisterView } from "./features/register/RegisterView";
+import { ReviewView } from "./features/review/ReviewView";
 import { useFormOptions } from "./hooks/useFormOptions";
 
-type Screen = "entry" | "register";
+type Screen = "entry" | "register" | "review";
 
 function App() {
   const [authed, setAuthed] = useState(!!getStoredPassword());
@@ -42,6 +43,12 @@ function App() {
           >
             Register
           </button>
+          <button
+            className={screen === "review" ? "gm-nav-tab gm-nav-tab--active" : "gm-nav-tab"}
+            onClick={() => setScreen("review")}
+          >
+            Review
+          </button>
         </div>
       )}
 
@@ -66,6 +73,10 @@ function App() {
 
         {authed && status === "ready" && options && screen === "register" && (
           <RegisterView formOptions={options} onAuthFailure={handleAuthFailure} />
+        )}
+
+        {authed && status === "ready" && options && screen === "review" && (
+          <ReviewView formOptions={options} onAuthFailure={handleAuthFailure} />
         )}
       </div>
     </div>

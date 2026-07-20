@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { callApi } from "../../api/client";
 import type { FormOptions, RegisterData, RegisterStatus } from "../../api/types";
 import { RegisterEntryRow } from "./RegisterEntryRow";
@@ -22,38 +22,34 @@ export function RegisterView({ formOptions, onAuthFailure }: Props) {
   const [data, setData] = useState<RegisterData | null>(null);
   const [error, setError] = useState("");
 
-  useEffect(() => {
+  const load = useCallback(async () => {
     if (!account) return;
-
-    let cancelled = false;
     setLoadStatus("loading");
 
-    async function load() {
-      const result = await callApi<RegisterData>("getRegister", { account, status });
+    const result = await callApi<RegisterData>("getRegister", { account, status });
 
-      if (cancelled) return;
-
-      if (!result.ok) {
-        if (result.code === "BAD_PASSWORD") {
-          onAuthFailure();
-          return;
-        }
-        setError(result.error);
-        setLoadStatus("error");
+    if (!result.ok) {
+      if (result.code === "BAD_PASSWORD") {
+        onAuthFailure();
         return;
       }
-
-      setData(result.data);
-      setLoadStatus("ready");
+      setError(result.error);
+      setLoadStatus("error");
+      return;
     }
 
-    load();
-
-    return () => {
-      cancelled = true;
-    };
+    setData(result.data);
+    setLoadStatus("ready");
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [account, status]);
+
+  useEffect(() => {
+    load();
+  }, [load]);
+
+  const manualUnclearedEntries = (data?.entries ?? []).filter(
+    (e) => e.source === "Manual" && e.status === "Uncleared"
+  );
 
   return (
     <div className="gm-card gm-card--wide">
@@ -112,7 +108,15 @@ export function RegisterView({ formOptions, onAuthFailure }: Props) {
           ) : (
             <div className="gm-register-list">
               {data.entries.map((entry, index) => (
-                <RegisterEntryRow key={`${entry.date}-${entry.payee}-${index}`} entry={entry} />
+                <RegisterEntryRow
+                  key={entry.transactionId || `${entry.date}-${entry.payee}-${index}`}
+                  entry={entry}
+                  account={account}
+                  formOptions={formOptions}
+                  manualUnclearedEntries={manualUnclearedEntries}
+                  onAuthFailure={onAuthFailure}
+                  onChanged={load}
+                />
               ))}
             </div>
           )}

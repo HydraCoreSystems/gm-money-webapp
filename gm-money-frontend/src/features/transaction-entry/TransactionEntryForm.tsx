@@ -1,7 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { callApi, getStoredEnteredBy } from "../../api/client";
 import type { CreateTransactionResult, FormOptions } from "../../api/types";
-import { CategoryPicker } from "./CategoryPicker";
+import { TransactionFields } from "./TransactionFields";
 
 function todayLocalDate(): string {
   const now = new Date();
@@ -30,11 +30,6 @@ export function TransactionEntryForm({ formOptions: options, onAuthFailure }: Pr
   const [submitStatus, setSubmitStatus] = useState<"idle" | "submitting" | "success">("idle");
   const [submitError, setSubmitError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
-
-  const preview =
-    type && amountText
-      ? `${type === "Income" ? "+" : "-"}$${Number(amountText || 0).toFixed(2)} (${type})`
-      : null;
 
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
@@ -82,101 +77,29 @@ export function TransactionEntryForm({ formOptions: options, onAuthFailure }: Pr
       {submitStatus === "success" && <p className="gm-success">{successMessage}</p>}
 
       <form onSubmit={handleSubmit}>
-        <div className="gm-field">
-          <label htmlFor="date">Date</label>
-          <input
-            id="date"
-            type="date"
-            value={date}
-            onChange={(e) => setDate(e.target.value)}
-            required
-          />
-        </div>
-
-        <div className="gm-field">
-          <label htmlFor="account">Account</label>
-          <select
-            id="account"
-            value={account}
-            onChange={(e) => setAccount(e.target.value)}
-            required
-          >
-            <option value="" disabled>
-              Choose an account…
-            </option>
-            {options.accounts.map((acc) => (
-              <option key={acc} value={acc}>
-                {acc}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="gm-field">
-          <label htmlFor="payee">Payee</label>
-          <input
-            id="payee"
-            type="text"
-            value={payee}
-            onChange={(e) => setPayee(e.target.value)}
-            required
-          />
-        </div>
-
-        <div className="gm-field">
-          <label htmlFor="amount">Amount</label>
-          <input
-            id="amount"
-            type="number"
-            inputMode="decimal"
-            step="0.01"
-            min="0.01"
-            value={amountText}
-            onChange={(e) => setAmountText(e.target.value)}
-            required
-          />
-        </div>
-
-        <CategoryPicker
-          groups={options.categoryGroups}
+        <TransactionFields
+          formOptions={options}
+          date={date}
+          onDateChange={setDate}
+          account={account}
+          onAccountChange={setAccount}
+          payee={payee}
+          onPayeeChange={setPayee}
+          amountText={amountText}
+          onAmountChange={setAmountText}
           category={category}
           subcategory={subcategory}
-          onChange={(next) => {
+          type={type}
+          onCategoryChange={(next) => {
             setCategory(next.category);
             setSubcategory(next.subcategory);
             setType(next.type);
           }}
+          paymentMethod={paymentMethod}
+          onPaymentMethodChange={setPaymentMethod}
+          notes={notes}
+          onNotesChange={setNotes}
         />
-
-        {preview && (
-          <p className={`gm-preview gm-preview--${type === "Income" ? "income" : "expense"}`}>
-            {preview}
-          </p>
-        )}
-
-        <div className="gm-field">
-          <label htmlFor="paymentMethod">Payment Method</label>
-          <select
-            id="paymentMethod"
-            value={paymentMethod}
-            onChange={(e) => setPaymentMethod(e.target.value)}
-            required
-          >
-            <option value="" disabled>
-              Choose a payment method…
-            </option>
-            {options.paymentMethods.map((method) => (
-              <option key={method} value={method}>
-                {method}
-              </option>
-            ))}
-          </select>
-        </div>
-
-        <div className="gm-field">
-          <label htmlFor="notes">Notes</label>
-          <textarea id="notes" value={notes} onChange={(e) => setNotes(e.target.value)} />
-        </div>
 
         <button type="submit" className="gm-button" disabled={submitStatus === "submitting"}>
           {submitStatus === "submitting" ? "Saving…" : "Save Transaction"}
