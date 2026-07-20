@@ -170,3 +170,133 @@ body {
   color: #fff;
   font-weight: 600;
 }
+
+.gm-nav-tabs {
+  display: flex;
+  gap: 0.25rem;
+  background: var(--gm-header);
+  padding: 0 1.25rem;
+}
+
+.gm-nav-tab {
+  padding: 0.6rem 1rem;
+  border: none;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.7);
+  font-size: 0.95rem;
+  font-weight: 600;
+  cursor: pointer;
+  border-bottom: 3px solid transparent;
+}
+
+.gm-nav-tab--active {
+  color: #fff;
+  border-bottom-color: var(--gm-accent);
+}
+
+.gm-card--wide {
+  max-width: 640px;
+}
+
+.gm-register-summary {
+  display: flex;
+  gap: 1.5rem;
+  margin-bottom: 1rem;
+  padding-bottom: 1rem;
+  border-bottom: 1px solid var(--gm-border);
+}
+
+.gm-register-summary__label {
+  font-size: 0.8rem;
+  color: var(--gm-text-muted);
+}
+
+.gm-register-summary__value {
+  font-size: 1.15rem;
+  font-weight: 700;
+}
+
+.gm-register-note {
+  font-size: 0.8rem;
+  color: var(--gm-text-muted);
+  margin: 0 0 0.75rem;
+}
+
+.gm-register-list {
+  display: flex;
+  flex-direction: column;
+  gap: 0.5rem;
+}
+
+.gm-register-row {
+  display: flex;
+  align-items: center;
+  gap: 0.75rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--gm-border);
+  border-radius: 8px;
+}
+
+.gm-register-row__main {
+  flex: 1;
+  min-width: 0;
+}
+
+.gm-register-row__payee {
+  font-weight: 600;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gm-register-row__meta {
+  font-size: 0.8rem;
+  color: var(--gm-text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.gm-register-row__amounts {
+  text-align: right;
+  flex-shrink: 0;
+}
+
+.gm-register-row__amount--negative {
+  color: var(--gm-negative);
+  font-weight: 600;
+}
+
+.gm-register-row__amount--positive {
+  color: var(--gm-positive);
+  font-weight: 600;
+}
+
+.gm-register-row__balance {
+  font-size: 0.78rem;
+  color: var(--gm-text-muted);
+}
+
+.gm-status-badge {
+  flex-shrink: 0;
+  font-size: 0.72rem;
+  font-weight: 600;
+  padding: 0.2rem 0.5rem;
+  border-radius: 999px;
+  white-space: nowrap;
+}
+
+.gm-status-badge--uncleared {
+  background: #fff4cc;
+  color: #8a6300;
+}
+
+.gm-status-badge--cleared {
+  background: #e8f5e9;
+  color: #1b5e20;
+}
+
+.gm-status-badge--reconciled {
+  background: #e3f2fd;
+  color: #0d47a1;
+}

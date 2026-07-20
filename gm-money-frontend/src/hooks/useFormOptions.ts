@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
-import { callApi } from "../../api/client";
-import type { FormOptions } from "../../api/types";
+import { callApi } from "../api/client";
+import type { FormOptions } from "../api/types";
 
 type Status = "loading" | "ready" | "error";
 

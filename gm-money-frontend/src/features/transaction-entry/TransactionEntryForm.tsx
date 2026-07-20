@@ -1,8 +1,7 @@
 import { useState, type FormEvent } from "react";
 import { callApi, getStoredEnteredBy } from "../../api/client";
-import type { CreateTransactionResult } from "../../api/types";
+import type { CreateTransactionResult, FormOptions } from "../../api/types";
 import { CategoryPicker } from "./CategoryPicker";
-import { useFormOptions } from "./useFormOptions";
 
 function todayLocalDate(): string {
   const now = new Date();
@@ -13,12 +12,11 @@ function todayLocalDate(): string {
 }
 
 type Props = {
+  formOptions: FormOptions;
   onAuthFailure: () => void;
 };
 
-export function TransactionEntryForm({ onAuthFailure }: Props) {
-  const { status, options, error: optionsError } = useFormOptions(onAuthFailure);
-
+export function TransactionEntryForm({ formOptions: options, onAuthFailure }: Props) {
   const [date, setDate] = useState(todayLocalDate());
   const [account, setAccount] = useState("");
   const [payee, setPayee] = useState("");
@@ -32,22 +30,6 @@ export function TransactionEntryForm({ onAuthFailure }: Props) {
   const [submitStatus, setSubmitStatus] = useState<"idle" | "submitting" | "success">("idle");
   const [submitError, setSubmitError] = useState("");
   const [successMessage, setSuccessMessage] = useState("");
-
-  if (status === "loading") {
-    return (
-      <div className="gm-card">
-        <p>Loading form…</p>
-      </div>
-    );
-  }
-
-  if (status === "error" || !options) {
-    return (
-      <div className="gm-card">
-        <p className="gm-error">{optionsError || "Could not load the form."}</p>
-      </div>
-    );
-  }
 
   const preview =
     type && amountText
