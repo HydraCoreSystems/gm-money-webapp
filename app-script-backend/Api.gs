@@ -108,6 +108,9 @@ function handleApiRequest_(e) {
       case "approveTransaction":
         return jsonOutput_(apiApproveTransaction_(payload));
 
+      case "getDashboard":
+        return jsonOutput_({ ok: true, data: apiGetDashboard_() });
+
       default:
         return jsonError_(
           'Unknown action: "' + action + '".',
@@ -865,4 +868,101 @@ function apiApproveTransaction_(payload) {
   } finally {
     lock.releaseLock();
   }
+}
+
+
+/* ============================================================
+   getDashboard
+============================================================ */
+
+/**
+ * Reuses getLatestAccountBalances_ (Dashboard.gs), buildRegisterEntries_
+ * (Register.gs, empty accountName = all accounts, same as the original
+ * Sheets dashboard's own getManualDashboardSummary_), and this file's
+ * own apiGetReviewTransactions_ for the pending-review count (avoids a
+ * second, redundant full scan of the Tiller sheet, and guarantees this
+ * count always matches what the Review tab actually shows).
+ *
+ * Deliberately does NOT port forward a bug found in the original
+ * getManualDashboardSummary_ (Dashboard.gs): it derives Income/Expenses
+ * This Month from the raw sign of the amount rather than
+ * getConfiguredCategoryType_(entry.category), which CLAUDE.md explicitly
+ * calls out as wrong (a refund on an expense category should still
+ * count as that category's spending, not income). This version uses
+ * getConfiguredCategoryType_, the same function apiCreateTransaction_
+ * already uses correctly.
+ */
+function apiGetDashboard_() {
+  const balances = getLatestAccountBalances_();
+  const currentCash = balances.reduce(function(sum, b) { return sum + b.balance; }, 0);
+
+  const manual = getManualTransactionsSheet_();
+  const source = getTillerTransactionsSheet_();
+  const entries = buildRegisterEntries_(manual, source, "");
+
+  const now = new Date();
+  const month = now.getMonth();
+  const year = now.getFullYear();
+
+  let incomeThisMonth = 0;
+  let expensesThisMonth = 0;
+  let unclearedNet = 0;
+  let unclearedCount = 0;
+
+  entries.forEach(function(entry) {
+    const date = entry.date instanceof Date ? entry.date : new Date(entry.date);
+    const status = String(entry.status || "").trim().toLowerCase();
+
+    if (!isNaN(date.getTime()) && date.getMonth() === month && date.getFullYear() === year) {
+      const type = getConfiguredCategoryType_(entry.category);
+
+      if (type === "Income") {
+        incomeThisMonth += Math.abs(entry.amount);
+      } else {
+        expensesThisMonth += Math.abs(entry.amount);
+      }
+    }
+
+    if (status === "uncleared") {
+      unclearedNet += entry.amount;
+      unclearedCount++;
+    }
+  });
+
+  const recentTransactions = entries
+    .slice()
+    .sort(function(a, b) {
+      const dateA = new Date(a.date).getTime();
+      const dateB = new Date(b.date).getTime();
+      return dateA !== dateB ? dateB - dateA : 0;
+    })
+    .slice(0, 8)
+    .map(function(entry) {
+      return {
+        date: entry.date instanceof Date
+          ? Utilities.formatDate(entry.date, Session.getScriptTimeZone(), "yyyy-MM-dd")
+          : String(entry.date),
+        payee: entry.payee,
+        category: entry.category,
+        subcategory: entry.subcategory,
+        amount: entry.amount,
+        status: entry.status,
+        account: entry.account
+      };
+    });
+
+  const pendingReviewCount = apiGetReviewTransactions_().length;
+
+  return {
+    currentCash: currentCash,
+    projectedCash: currentCash + unclearedNet,
+    incomeThisMonth: incomeThisMonth,
+    expensesThisMonth: expensesThisMonth,
+    pendingReviewCount: pendingReviewCount,
+    unclearedCount: unclearedCount,
+    accountBalances: balances.map(function(b) {
+      return { account: b.account, balance: b.balance };
+    }),
+    recentTransactions: recentTransactions
+  };
 }
