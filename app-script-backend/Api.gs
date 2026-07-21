@@ -174,14 +174,17 @@ function handleApiRequest_(e) {
       case "getNotificationSettings":
         return jsonOutput_({ ok: true, data: apiGetNotificationSettings_() });
 
-      case "setNotificationEmails":
-        return jsonOutput_(apiSetNotificationEmails_(payload));
+      case "addNotificationRecipient":
+        return jsonOutput_(apiAddNotificationRecipient_(payload));
 
-      case "setNotificationPrefs":
-        return jsonOutput_(apiSetNotificationPrefs_(payload));
+      case "removeNotificationRecipient":
+        return jsonOutput_(apiRemoveNotificationRecipient_(payload));
+
+      case "updateNotificationRecipient":
+        return jsonOutput_(apiUpdateNotificationRecipient_(payload));
 
       case "sendTestNotification":
-        return jsonOutput_(apiSendTestNotification_());
+        return jsonOutput_(apiSendTestNotification_(payload));
 
       default:
         return jsonError_(
@@ -2296,15 +2299,28 @@ function apiDeleteBudget_(payload) {
    explicitly deferred by the owner (real new infra, and don't work on
    iPhone at all until installed as a PWA) -- email first.
 
-   Setting a notification email both stores it AND installs a daily
-   time-driven trigger (no manual Apps Script editor visit required);
-   clearing it removes the trigger too. A daily digest only sends when
-   there's actually something to report (upcoming bills in the next 3
-   days, or categories currently over budget) -- never an empty
-   "nothing to report" email every single day.
+   Recipients are stored as a list, each with their OWN name, email,
+   and preferences -- not one shared global setting. This intentionally
+   stops short of real per-person login (still one shared app password,
+   per the "simple password protection, not full user accounts"
+   decision in CLAUDE.md) but lets Phil and Crystal each choose what
+   they personally want to be notified about, tied to the same
+   Phil/Crystal identity already used for "Entered By" attribution
+   elsewhere in the app.
+
+   Adding the first recipient installs a daily time-driven trigger (no
+   manual Apps Script editor visit required); removing the last one
+   removes the trigger too. The daily digest computes "what's true
+   today" (upcoming bills, over-budget categories, low balances,
+   yesterday's deposits) ONCE and shares it across recipients, then
+   filters per-recipient by their own prefs -- so it never recomputes
+   the expensive parts once per person. Only sends to a recipient when
+   their own prefs actually produced something to report.
 ============================================================ */
 
-const GM_NOTIFICATION_EMAIL_PROPERTY = "GM_NOTIFICATION_EMAIL";
+const GM_NOTIFICATION_RECIPIENTS_PROPERTY = "GM_NOTIFICATION_RECIPIENTS";
+const GM_NOTIFICATION_EMAIL_PROPERTY_LEGACY_ = "GM_NOTIFICATION_EMAIL";
+const GM_NOTIFICATION_PREFS_PROPERTY_LEGACY_ = "GM_NOTIFICATION_PREFS";
 const GM_NOTIFICATION_TRIGGER_HANDLER = "sendDailyNotificationDigest_";
 const GM_NOTIFICATION_LOOKAHEAD_DAYS = 3;
 
@@ -2336,20 +2352,6 @@ function removeNotificationTrigger_() {
 
 const GM_NOTIFICATION_EMAIL_VALID_ = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
-// Stored as a single comma-separated string in Script Properties
-// (MailApp.sendEmail's `to` field already natively accepts a
-// comma-separated list, so no new storage shape is needed) -- exposed
-// to the frontend as a proper array so it can render an add/remove
-// list, same UI pattern as Payment Methods, rather than asking the
-// user to type comma-separated addresses into one box.
-function getNotificationEmailList_() {
-  const raw = PropertiesService.getScriptProperties().getProperty(GM_NOTIFICATION_EMAIL_PROPERTY) || "";
-  return raw.split(",").map(function(e) { return e.trim(); }).filter(function(e) { return e; });
-}
-
-
-const GM_NOTIFICATION_PREFS_PROPERTY = "GM_NOTIFICATION_PREFS";
-
 const GM_NOTIFICATION_PREFS_DEFAULTS_ = {
   upcomingBills: true,
   overBudget: true,
@@ -2359,55 +2361,108 @@ const GM_NOTIFICATION_PREFS_DEFAULTS_ = {
   newDepositThreshold: 0
 };
 
-function getNotificationPrefs_() {
-  const raw = PropertiesService.getScriptProperties().getProperty(GM_NOTIFICATION_PREFS_PROPERTY);
+function normalizeNotificationPrefs_(raw) {
+  const source = raw || {};
+  return {
+    upcomingBills: source.upcomingBills !== false,
+    overBudget: source.overBudget !== false,
+    lowBalance: source.lowBalance === true,
+    lowBalanceThreshold: isFinite(Number(source.lowBalanceThreshold)) ? Number(source.lowBalanceThreshold) : 100,
+    newDeposits: source.newDeposits === true,
+    newDepositThreshold: isFinite(Number(source.newDepositThreshold)) ? Number(source.newDepositThreshold) : 0
+  };
+}
 
-  if (!raw) {
-    return Object.assign({}, GM_NOTIFICATION_PREFS_DEFAULTS_);
-  }
 
-  try {
-    return Object.assign({}, GM_NOTIFICATION_PREFS_DEFAULTS_, JSON.parse(raw));
-  } catch (err) {
-    return Object.assign({}, GM_NOTIFICATION_PREFS_DEFAULTS_);
+function saveNotificationRecipients_(recipients) {
+  PropertiesService.getScriptProperties().setProperty(
+    GM_NOTIFICATION_RECIPIENTS_PROPERTY,
+    JSON.stringify(recipients)
+  );
+
+  if (recipients.length > 0) {
+    installNotificationTrigger_();
+  } else {
+    removeNotificationTrigger_();
   }
 }
 
 
-function apiSetNotificationPrefs_(payload) {
-  const prefs = {
-    upcomingBills: payload.upcomingBills !== false,
-    overBudget: payload.overBudget !== false,
-    lowBalance: payload.lowBalance === true,
-    lowBalanceThreshold: isFinite(Number(payload.lowBalanceThreshold)) ? Number(payload.lowBalanceThreshold) : 100,
-    newDeposits: payload.newDeposits === true,
-    newDepositThreshold: isFinite(Number(payload.newDepositThreshold)) ? Number(payload.newDepositThreshold) : 0
-  };
+// One-time migration from the old shared-email-list-plus-single-prefs
+// shape into per-recipient prefs -- existing recipients keep getting
+// exactly what they were already getting until someone edits their own
+// preferences or name.
+function migrateLegacyNotificationSettings_() {
+  const props = PropertiesService.getScriptProperties();
+  const legacyEmailsRaw = props.getProperty(GM_NOTIFICATION_EMAIL_PROPERTY_LEGACY_);
 
-  const lock = LockService.getScriptLock();
+  if (!legacyEmailsRaw) {
+    return [];
+  }
 
-  if (!lock.tryLock(10000)) {
-    return { ok: false, code: "LOCK_TIMEOUT", error: "The system is busy — try again in a moment." };
+  const legacyPrefsRaw = props.getProperty(GM_NOTIFICATION_PREFS_PROPERTY_LEGACY_);
+  let legacyPrefs = GM_NOTIFICATION_PREFS_DEFAULTS_;
+
+  if (legacyPrefsRaw) {
+    try {
+      legacyPrefs = normalizeNotificationPrefs_(JSON.parse(legacyPrefsRaw));
+    } catch (err) {
+      legacyPrefs = GM_NOTIFICATION_PREFS_DEFAULTS_;
+    }
+  }
+
+  const emails = legacyEmailsRaw.split(",").map(function(e) { return e.trim(); }).filter(function(e) { return e; });
+  const recipients = emails.map(function(email) {
+    return { name: "", email: email, prefs: Object.assign({}, legacyPrefs) };
+  });
+
+  saveNotificationRecipients_(recipients);
+  props.deleteProperty(GM_NOTIFICATION_EMAIL_PROPERTY_LEGACY_);
+  props.deleteProperty(GM_NOTIFICATION_PREFS_PROPERTY_LEGACY_);
+
+  return recipients;
+}
+
+
+function getNotificationRecipients_() {
+  const raw = PropertiesService.getScriptProperties().getProperty(GM_NOTIFICATION_RECIPIENTS_PROPERTY);
+
+  if (!raw) {
+    return migrateLegacyNotificationSettings_();
   }
 
   try {
-    PropertiesService.getScriptProperties().setProperty(GM_NOTIFICATION_PREFS_PROPERTY, JSON.stringify(prefs));
-    return { ok: true, data: { prefs: prefs } };
-  } finally {
-    lock.releaseLock();
+    const parsed = JSON.parse(raw);
+
+    if (!Array.isArray(parsed)) {
+      return [];
+    }
+
+    return parsed.map(function(r) {
+      return {
+        name: String(r.name || ""),
+        email: String(r.email || ""),
+        prefs: normalizeNotificationPrefs_(r.prefs)
+      };
+    });
+  } catch (err) {
+    return [];
   }
 }
 
 
 function apiGetNotificationSettings_() {
-  const emails = getNotificationEmailList_();
-  return { emails: emails, enabled: emails.length > 0, prefs: getNotificationPrefs_() };
+  return { recipients: getNotificationRecipients_() };
 }
 
 
-function apiSetNotificationEmails_(payload) {
-  const rawList = Array.isArray(payload.emails) ? payload.emails : [];
-  const emails = rawList.map(function(e) { return String(e || "").trim(); }).filter(function(e) { return e; });
+function apiAddNotificationRecipient_(payload) {
+  const email = String(payload.email || "").trim();
+  const name = String(payload.name || "").trim();
+
+  if (!GM_NOTIFICATION_EMAIL_VALID_.test(email)) {
+    return { ok: false, code: "VALIDATION_ERROR", error: '"' + email + '" is not a valid email address.' };
+  }
 
   const lock = LockService.getScriptLock();
 
@@ -2416,60 +2471,145 @@ function apiSetNotificationEmails_(payload) {
   }
 
   try {
-    if (emails.length === 0) {
-      PropertiesService.getScriptProperties().deleteProperty(GM_NOTIFICATION_EMAIL_PROPERTY);
-      removeNotificationTrigger_();
-      return { ok: true, data: { emails: [], enabled: false } };
+    const recipients = getNotificationRecipients_();
+
+    if (recipients.some(function(r) { return r.email.toLowerCase() === email.toLowerCase(); })) {
+      return { ok: false, code: "VALIDATION_ERROR", error: "That email is already on the list." };
     }
 
-    for (let i = 0; i < emails.length; i++) {
-      if (!GM_NOTIFICATION_EMAIL_VALID_.test(emails[i])) {
-        return { ok: false, code: "VALIDATION_ERROR", error: '"' + emails[i] + '" is not a valid email address.' };
-      }
-    }
-
-    PropertiesService.getScriptProperties().setProperty(GM_NOTIFICATION_EMAIL_PROPERTY, emails.join(","));
-    installNotificationTrigger_();
-    return { ok: true, data: { emails: emails, enabled: true } };
+    recipients.push({ name: name, email: email, prefs: Object.assign({}, GM_NOTIFICATION_PREFS_DEFAULTS_) });
+    saveNotificationRecipients_(recipients);
+    return { ok: true, data: { recipients: recipients } };
   } finally {
     lock.releaseLock();
   }
 }
 
 
-function buildNotificationDigestLines_() {
-  const prefs = getNotificationPrefs_();
-  const lines = [];
+function apiRemoveNotificationRecipient_(payload) {
+  const email = String(payload.email || "").trim().toLowerCase();
 
-  if (prefs.upcomingBills) {
-    const today = new Date();
-    today.setHours(0, 0, 0, 0);
+  const lock = LockService.getScriptLock();
 
-    const horizon = new Date(today);
-    horizon.setDate(horizon.getDate() + GM_NOTIFICATION_LOOKAHEAD_DAYS);
+  if (!lock.tryLock(10000)) {
+    return { ok: false, code: "LOCK_TIMEOUT", error: "The system is busy — try again in a moment." };
+  }
 
-    const upcomingBills = apiGetScheduledTransactions_().filter(function(item) {
-      if (!item.active) return false;
-      const due = parseDateOnly_(item.nextDue);
-      return due && due >= today && due <= horizon;
+  try {
+    const recipients = getNotificationRecipients_().filter(function(r) {
+      return r.email.toLowerCase() !== email;
     });
 
-    if (upcomingBills.length > 0) {
-      lines.push("Upcoming bills (next " + GM_NOTIFICATION_LOOKAHEAD_DAYS + " days):");
-      upcomingBills.forEach(function(b) {
-        lines.push("- " + b.payee + ": $" + Math.abs(b.amount).toFixed(2) + " due " + b.nextDue);
-      });
+    saveNotificationRecipients_(recipients);
+    return { ok: true, data: { recipients: recipients } };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+function apiUpdateNotificationRecipient_(payload) {
+  const email = String(payload.email || "").trim().toLowerCase();
+
+  const lock = LockService.getScriptLock();
+
+  if (!lock.tryLock(10000)) {
+    return { ok: false, code: "LOCK_TIMEOUT", error: "The system is busy — try again in a moment." };
+  }
+
+  try {
+    const recipients = getNotificationRecipients_();
+    const match = recipients.find(function(r) { return r.email.toLowerCase() === email; });
+
+    if (!match) {
+      return { ok: false, code: "NOT_FOUND", error: "That recipient could not be found." };
     }
+
+    if (payload.name !== undefined) {
+      match.name = String(payload.name || "").trim();
+    }
+
+    if (payload.prefs !== undefined) {
+      match.prefs = normalizeNotificationPrefs_(payload.prefs);
+    }
+
+    saveNotificationRecipients_(recipients);
+    return { ok: true, data: { recipients: recipients } };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+// Computes the shared, recipient-independent facts once per digest run
+// ("what bills are due, what's over budget, what balances are low,
+// what deposited yesterday") so per-recipient filtering below never
+// re-walks the register or re-runs the dashboard build once per person.
+function buildNotificationDigestContext_() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const horizon = new Date(today);
+  horizon.setDate(horizon.getDate() + GM_NOTIFICATION_LOOKAHEAD_DAYS);
+
+  const upcomingBills = apiGetScheduledTransactions_().filter(function(item) {
+    if (!item.active) return false;
+    const due = parseDateOnly_(item.nextDue);
+    return due && due >= today && due <= horizon;
+  });
+
+  // Bypasses the getDashboard cache deliberately -- this runs once a
+  // day via trigger, not per web request, so the ~15s full recompute
+  // cost is a non-issue here, and a notification email should always
+  // reflect genuinely current numbers.
+  const budgetProgress = buildDashboardData_().budgetProgress;
+  const accountBalances = getLatestAccountBalances_();
+
+  // "Yesterday" -- the digest runs at 7am, before that day's own
+  // transactions would typically exist yet, so the prior full day is
+  // the window that actually contains unreported activity.
+  const yesterdayStart = new Date();
+  yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+  yesterdayStart.setHours(0, 0, 0, 0);
+
+  const yesterdayEnd = new Date(yesterdayStart);
+  yesterdayEnd.setHours(23, 59, 59, 999);
+
+  const manual = getManualTransactionsSheet_();
+  const source = getTillerTransactionsSheet_();
+  const registerEntries = buildRegisterEntries_(manual, source, "");
+
+  const yesterdayDeposits = registerEntries.filter(function(entry) {
+    const date = entry.date instanceof Date ? entry.date : new Date(entry.date);
+
+    if (isNaN(date.getTime()) || date < yesterdayStart || date > yesterdayEnd) {
+      return false;
+    }
+
+    return getConfiguredCategoryType_(entry.category) === "Income";
+  });
+
+  return {
+    upcomingBills: upcomingBills,
+    budgetProgress: budgetProgress,
+    accountBalances: accountBalances,
+    yesterdayDeposits: yesterdayDeposits
+  };
+}
+
+
+function buildNotificationDigestLinesForPrefs_(context, prefs) {
+  const lines = [];
+
+  if (prefs.upcomingBills && context.upcomingBills.length > 0) {
+    lines.push("Upcoming bills (next " + GM_NOTIFICATION_LOOKAHEAD_DAYS + " days):");
+    context.upcomingBills.forEach(function(b) {
+      lines.push("- " + b.payee + ": $" + Math.abs(b.amount).toFixed(2) + " due " + b.nextDue);
+    });
   }
 
   if (prefs.overBudget) {
-    // Bypasses the getDashboard cache deliberately -- this runs once a
-    // day via trigger, not per web request, so the ~15s full recompute
-    // cost is a non-issue here, and a notification email should always
-    // reflect genuinely current numbers.
-    const overBudget = buildDashboardData_().budgetProgress.filter(function(b) {
-      return b.spent > b.budgeted;
-    });
+    const overBudget = context.budgetProgress.filter(function(b) { return b.spent > b.budgeted; });
 
     if (overBudget.length > 0) {
       if (lines.length > 0) lines.push("");
@@ -2483,9 +2623,7 @@ function buildNotificationDigestLines_() {
   }
 
   if (prefs.lowBalance) {
-    const lowAccounts = getLatestAccountBalances_().filter(function(b) {
-      return b.balance < prefs.lowBalanceThreshold;
-    });
+    const lowAccounts = context.accountBalances.filter(function(b) { return b.balance < prefs.lowBalanceThreshold; });
 
     if (lowAccounts.length > 0) {
       if (lines.length > 0) lines.push("");
@@ -2497,32 +2635,8 @@ function buildNotificationDigestLines_() {
   }
 
   if (prefs.newDeposits) {
-    // "Yesterday" -- the digest runs at 7am, before that day's own
-    // transactions would typically exist yet, so the prior full day is
-    // the window that actually contains unreported activity.
-    const yesterdayStart = new Date();
-    yesterdayStart.setDate(yesterdayStart.getDate() - 1);
-    yesterdayStart.setHours(0, 0, 0, 0);
-
-    const yesterdayEnd = new Date(yesterdayStart);
-    yesterdayEnd.setHours(23, 59, 59, 999);
-
-    const manual = getManualTransactionsSheet_();
-    const source = getTillerTransactionsSheet_();
-    const entries = buildRegisterEntries_(manual, source, "");
-
-    const deposits = entries.filter(function(entry) {
-      const date = entry.date instanceof Date ? entry.date : new Date(entry.date);
-
-      if (isNaN(date.getTime()) || date < yesterdayStart || date > yesterdayEnd) {
-        return false;
-      }
-
-      if (getConfiguredCategoryType_(entry.category) !== "Income") {
-        return false;
-      }
-
-      return Math.abs(entry.amount) >= prefs.newDepositThreshold;
+    const deposits = context.yesterdayDeposits.filter(function(d) {
+      return Math.abs(d.amount) >= prefs.newDepositThreshold;
     });
 
     if (deposits.length > 0) {
@@ -2539,37 +2653,52 @@ function buildNotificationDigestLines_() {
 
 
 function sendDailyNotificationDigest_() {
-  const emails = getNotificationEmailList_();
+  const recipients = getNotificationRecipients_();
 
-  if (emails.length === 0) {
+  if (recipients.length === 0) {
     return;
   }
 
-  const lines = buildNotificationDigestLines_();
+  const context = buildNotificationDigestContext_();
 
-  if (lines.length === 0) {
-    return;
-  }
+  recipients.forEach(function(r) {
+    const lines = buildNotificationDigestLinesForPrefs_(context, r.prefs);
 
-  MailApp.sendEmail({
-    to: emails.join(","),
-    subject: "GM Money — daily update",
-    body: lines.join("\n")
+    if (lines.length === 0) {
+      return;
+    }
+
+    MailApp.sendEmail({
+      to: r.email,
+      subject: "GM Money — daily update",
+      body: lines.join("\n")
+    });
   });
 }
 
 
-function apiSendTestNotification_() {
-  const emails = getNotificationEmailList_();
+function apiSendTestNotification_(payload) {
+  const recipients = getNotificationRecipients_();
 
-  if (emails.length === 0) {
+  if (recipients.length === 0) {
     return { ok: false, code: "VALIDATION_ERROR", error: "Add a notification email first." };
   }
 
-  MailApp.sendEmail({
-    to: emails.join(","),
-    subject: "GM Money — test notification",
-    body: "This is a test notification from GM Money. If you're seeing this, email notifications are working correctly."
+  const targetEmail = payload && payload.email ? String(payload.email).trim().toLowerCase() : "";
+  const targets = targetEmail
+    ? recipients.filter(function(r) { return r.email.toLowerCase() === targetEmail; })
+    : recipients;
+
+  if (targets.length === 0) {
+    return { ok: false, code: "NOT_FOUND", error: "That recipient could not be found." };
+  }
+
+  targets.forEach(function(r) {
+    MailApp.sendEmail({
+      to: r.email,
+      subject: "GM Money — test notification",
+      body: "This is a test notification from GM Money. If you're seeing this, email notifications are working correctly."
+    });
   });
 
   return { ok: true, data: { sent: true } };

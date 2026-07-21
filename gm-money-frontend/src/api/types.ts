@@ -159,10 +159,14 @@ export type NotificationPrefs = {
   newDepositThreshold: number;
 };
 
-export type NotificationSettings = {
-  emails: string[];
-  enabled: boolean;
+export type NotificationRecipient = {
+  name: string;
+  email: string;
   prefs: NotificationPrefs;
+};
+
+export type NotificationSettings = {
+  recipients: NotificationRecipient[];
 };
 
 export type BudgetRecord = {

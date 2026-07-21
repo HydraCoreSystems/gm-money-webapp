@@ -6,6 +6,7 @@ import type {
   BudgetRecord,
   FormOptions,
   NotificationPrefs,
+  NotificationRecipient,
   NotificationSettings,
 } from "../../api/types";
 
@@ -36,12 +37,14 @@ export function SettingsView({ onAuthFailure }: Props) {
   const [budgets, setBudgets] = useState<BudgetRecord[]>([]);
   const [budgetDrafts, setBudgetDrafts] = useState<Record<string, string>>({});
 
-  const [notificationEmails, setNotificationEmails] = useState<string[]>([]);
-  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
-  const [newNotificationEmail, setNewNotificationEmail] = useState("");
+  const [recipients, setRecipients] = useState<NotificationRecipient[]>([]);
+  const [recipientDrafts, setRecipientDrafts] = useState<
+    Record<string, { name: string; prefs: NotificationPrefs }>
+  >({});
+  const [dirtyEmails, setDirtyEmails] = useState<Record<string, boolean>>({});
+  const [newRecipientName, setNewRecipientName] = useState("");
+  const [newRecipientEmail, setNewRecipientEmail] = useState("");
   const [testMessage, setTestMessage] = useState("");
-  const [prefsDraft, setPrefsDraft] = useState<NotificationPrefs>(DEFAULT_NOTIFICATION_PREFS);
-  const [prefsSaved, setPrefsSaved] = useState(true);
 
   async function load() {
     setStatus("loading");
@@ -71,10 +74,13 @@ export function SettingsView({ onAuthFailure }: Props) {
     }
 
     if (notificationsResult.ok) {
-      setNotificationEmails(notificationsResult.data.emails);
-      setNotificationsEnabled(notificationsResult.data.enabled);
-      setPrefsDraft(notificationsResult.data.prefs);
-      setPrefsSaved(true);
+      setRecipients(notificationsResult.data.recipients);
+      setRecipientDrafts(
+        Object.fromEntries(
+          notificationsResult.data.recipients.map((r) => [r.email, { name: r.name, prefs: r.prefs }])
+        )
+      );
+      setDirtyEmails({});
     }
 
     setStatus("ready");
@@ -155,36 +161,53 @@ export function SettingsView({ onAuthFailure }: Props) {
     });
   }
 
-  async function handleAddNotificationEmail() {
-    const email = newNotificationEmail.trim();
-    if (!email || notificationEmails.includes(email)) return;
-    setTestMessage("");
-    await withBusy(() => callApi("setNotificationEmails", { emails: [...notificationEmails, email] }));
-    setNewNotificationEmail("");
-  }
-
-  async function handleRemoveNotificationEmail(email: string) {
+  async function handleAddRecipient() {
+    const email = newRecipientEmail.trim();
+    if (!email) return;
     setTestMessage("");
     await withBusy(() =>
-      callApi("setNotificationEmails", { emails: notificationEmails.filter((e) => e !== email) })
+      callApi("addNotificationRecipient", { name: newRecipientName.trim(), email })
+    );
+    setNewRecipientName("");
+    setNewRecipientEmail("");
+  }
+
+  async function handleRemoveRecipient(email: string) {
+    if (!window.confirm(`Remove ${email} from notifications?`)) return;
+    setTestMessage("");
+    await withBusy(() => callApi("removeNotificationRecipient", { email }));
+  }
+
+  function updateRecipientName(email: string, name: string) {
+    setRecipientDrafts((prev) => ({
+      ...prev,
+      [email]: { ...(prev[email] ?? { name: "", prefs: DEFAULT_NOTIFICATION_PREFS }), name },
+    }));
+    setDirtyEmails((prev) => ({ ...prev, [email]: true }));
+  }
+
+  function updateRecipientPrefs(email: string, patch: Partial<NotificationPrefs>) {
+    setRecipientDrafts((prev) => {
+      const current = prev[email] ?? { name: "", prefs: DEFAULT_NOTIFICATION_PREFS };
+      return { ...prev, [email]: { ...current, prefs: { ...current.prefs, ...patch } } };
+    });
+    setDirtyEmails((prev) => ({ ...prev, [email]: true }));
+  }
+
+  async function handleSaveRecipient(email: string) {
+    const draft = recipientDrafts[email];
+    if (!draft) return;
+    setTestMessage("");
+    await withBusy(() =>
+      callApi("updateNotificationRecipient", { email, name: draft.name, prefs: draft.prefs })
     );
   }
 
-  function updatePrefsDraft(patch: Partial<NotificationPrefs>) {
-    setPrefsDraft((prev) => ({ ...prev, ...patch }));
-    setPrefsSaved(false);
-  }
-
-  async function handleSavePrefs() {
-    setTestMessage("");
-    await withBusy(() => callApi("setNotificationPrefs", prefsDraft));
-  }
-
-  async function handleSendTestNotification() {
+  async function handleSendTestNotification(email?: string) {
     setBusy(true);
     setError("");
     setTestMessage("");
-    const result = await callApi("sendTestNotification");
+    const result = await callApi("sendTestNotification", email ? { email } : {});
     setBusy(false);
 
     if (!result.ok) {
@@ -196,7 +219,9 @@ export function SettingsView({ onAuthFailure }: Props) {
       return;
     }
 
-    setTestMessage("Test email sent — check your inbox in a minute.");
+    setTestMessage(
+      email ? `Test email sent to ${email} — check the inbox in a minute.` : "Test email sent — check your inbox in a minute."
+    );
   }
 
   if (status === "loading") {
@@ -223,129 +248,149 @@ export function SettingsView({ onAuthFailure }: Props) {
 
       <h3>Notifications</h3>
       <p className="gm-register-note">
-        Get a daily email when bills are due within {"3"} days or a category goes over budget. Nothing
-        is sent on days with nothing to report. Add anyone who should be notified.
+        Get a daily email when bills are due within 3 days or a category goes over budget. Nothing
+        is sent on days with nothing to report. Each person below has their own name and their own
+        preferences — add anyone who should be notified.
       </p>
 
       {testMessage && <p className="gm-success">{testMessage}</p>}
 
-      {notificationEmails.length > 0 && (
-        <ul className="gm-settings-subcategory-list">
-          {notificationEmails.map((email) => (
-            <li key={email}>
-              <span>{email}</span>
+      {recipients.map((r) => {
+        const draft = recipientDrafts[r.email] ?? { name: r.name, prefs: r.prefs };
+        const dirty = !!dirtyEmails[r.email];
+
+        return (
+          <div key={r.email} className="gm-settings-category">
+            <div className="gm-settings-category__header">
+              <input
+                type="text"
+                placeholder="Name (optional)"
+                value={draft.name}
+                disabled={busy}
+                onChange={(e) => updateRecipientName(r.email, e.target.value)}
+                style={{ maxWidth: "10rem" }}
+              />
+              <span className="gm-register-note" style={{ margin: 0, flex: 1 }}>
+                {r.email}
+              </span>
               <button
                 type="button"
                 className="gm-link-button"
                 disabled={busy}
-                onClick={() => handleRemoveNotificationEmail(email)}
+                onClick={() => handleRemoveRecipient(r.email)}
               >
                 Remove
               </button>
-            </li>
-          ))}
-        </ul>
-      )}
+            </div>
+
+            <label className="gm-notification-pref">
+              <input
+                type="checkbox"
+                checked={draft.prefs.upcomingBills}
+                disabled={busy}
+                onChange={(e) => updateRecipientPrefs(r.email, { upcomingBills: e.target.checked })}
+              />
+              Upcoming bills (next 3 days)
+            </label>
+
+            <label className="gm-notification-pref">
+              <input
+                type="checkbox"
+                checked={draft.prefs.overBudget}
+                disabled={busy}
+                onChange={(e) => updateRecipientPrefs(r.email, { overBudget: e.target.checked })}
+              />
+              Categories over budget
+            </label>
+
+            <label className="gm-notification-pref">
+              <input
+                type="checkbox"
+                checked={draft.prefs.lowBalance}
+                disabled={busy}
+                onChange={(e) => updateRecipientPrefs(r.email, { lowBalance: e.target.checked })}
+              />
+              Low account balance, below
+              <input
+                type="number"
+                step="1"
+                min="0"
+                value={draft.prefs.lowBalanceThreshold}
+                disabled={busy || !draft.prefs.lowBalance}
+                onChange={(e) =>
+                  updateRecipientPrefs(r.email, { lowBalanceThreshold: Number(e.target.value) })
+                }
+                className="gm-notification-pref__amount"
+              />
+            </label>
+
+            <label className="gm-notification-pref">
+              <input
+                type="checkbox"
+                checked={draft.prefs.newDeposits}
+                disabled={busy}
+                onChange={(e) => updateRecipientPrefs(r.email, { newDeposits: e.target.checked })}
+              />
+              New deposits, at least
+              <input
+                type="number"
+                step="1"
+                min="0"
+                value={draft.prefs.newDepositThreshold}
+                disabled={busy || !draft.prefs.newDeposits}
+                onChange={(e) =>
+                  updateRecipientPrefs(r.email, { newDepositThreshold: Number(e.target.value) })
+                }
+                className="gm-notification-pref__amount"
+              />
+            </label>
+
+            <div className="gm-settings-add-row" style={{ marginTop: "0.5rem" }}>
+              <button
+                type="button"
+                className="gm-link-button"
+                disabled={busy || !dirty}
+                onClick={() => handleSaveRecipient(r.email)}
+              >
+                Save Preferences
+              </button>
+              <button
+                type="button"
+                className="gm-link-button"
+                disabled={busy}
+                onClick={() => handleSendTestNotification(r.email)}
+              >
+                Send Test Email
+              </button>
+            </div>
+          </div>
+        );
+      })}
 
       <div className="gm-settings-add-row">
         <input
+          type="text"
+          placeholder="Name (optional)"
+          value={newRecipientName}
+          onChange={(e) => setNewRecipientName(e.target.value)}
+          disabled={busy}
+        />
+        <input
           type="email"
           placeholder="name@example.com"
-          value={newNotificationEmail}
-          onChange={(e) => setNewNotificationEmail(e.target.value)}
+          value={newRecipientEmail}
+          onChange={(e) => setNewRecipientEmail(e.target.value)}
           disabled={busy}
         />
         <button
           type="button"
           className="gm-link-button"
-          disabled={busy || !newNotificationEmail.trim()}
-          onClick={handleAddNotificationEmail}
+          disabled={busy || !newRecipientEmail.trim()}
+          onClick={handleAddRecipient}
         >
-          Add
+          Add Person
         </button>
       </div>
-
-      <h4>Notify me about</h4>
-
-      <label className="gm-notification-pref">
-        <input
-          type="checkbox"
-          checked={prefsDraft.upcomingBills}
-          disabled={busy}
-          onChange={(e) => updatePrefsDraft({ upcomingBills: e.target.checked })}
-        />
-        Upcoming bills (next 3 days)
-      </label>
-
-      <label className="gm-notification-pref">
-        <input
-          type="checkbox"
-          checked={prefsDraft.overBudget}
-          disabled={busy}
-          onChange={(e) => updatePrefsDraft({ overBudget: e.target.checked })}
-        />
-        Categories over budget
-      </label>
-
-      <label className="gm-notification-pref">
-        <input
-          type="checkbox"
-          checked={prefsDraft.lowBalance}
-          disabled={busy}
-          onChange={(e) => updatePrefsDraft({ lowBalance: e.target.checked })}
-        />
-        Low account balance, below
-        <input
-          type="number"
-          step="1"
-          min="0"
-          value={prefsDraft.lowBalanceThreshold}
-          disabled={busy || !prefsDraft.lowBalance}
-          onChange={(e) => updatePrefsDraft({ lowBalanceThreshold: Number(e.target.value) })}
-          className="gm-notification-pref__amount"
-        />
-      </label>
-
-      <label className="gm-notification-pref">
-        <input
-          type="checkbox"
-          checked={prefsDraft.newDeposits}
-          disabled={busy}
-          onChange={(e) => updatePrefsDraft({ newDeposits: e.target.checked })}
-        />
-        New deposits, at least
-        <input
-          type="number"
-          step="1"
-          min="0"
-          value={prefsDraft.newDepositThreshold}
-          disabled={busy || !prefsDraft.newDeposits}
-          onChange={(e) => updatePrefsDraft({ newDepositThreshold: Number(e.target.value) })}
-          className="gm-notification-pref__amount"
-        />
-      </label>
-
-      <button
-        type="button"
-        className="gm-link-button"
-        disabled={busy || prefsSaved}
-        onClick={handleSavePrefs}
-        style={{ marginTop: "0.5rem" }}
-      >
-        Save Preferences
-      </button>
-
-      {notificationsEnabled && (
-        <div className="gm-settings-add-row" style={{ marginTop: "0.75rem" }}>
-          <span style={{ flex: 1 }}>
-            Notifications are on for {notificationEmails.length}{" "}
-            {notificationEmails.length === 1 ? "person" : "people"}.
-          </span>
-          <button type="button" className="gm-link-button" disabled={busy} onClick={handleSendTestNotification}>
-            Send Test Email
-          </button>
-        </div>
-      )}
 
       <h3>Categories</h3>
 
