@@ -126,6 +126,11 @@ export type DashboardAccountBalance = {
   balance: number;
 };
 
+export type DashboardSpendingCategory = {
+  category: string;
+  amount: number;
+};
+
 export type DashboardData = {
   currentCash: number;
   projectedCash: number;
@@ -135,6 +140,7 @@ export type DashboardData = {
   unclearedCount: number;
   accountBalances: DashboardAccountBalance[];
   recentTransactions: DashboardRecentTransaction[];
+  spendingByCategory: DashboardSpendingCategory[];
 };
 
 export type AddCategoryPayload = {

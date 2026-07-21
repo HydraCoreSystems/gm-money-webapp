@@ -1004,6 +1004,18 @@ function apiGetDashboard_() {
 
   const pendingReviewCount = apiGetReviewTransactions_().length;
 
+  // Reuses the Entry screen's existing category-breakdown helper
+  // (Entry.gs) verbatim -- same current-month grouping, same
+  // category-type filter (Expense only, via getConfiguredCategoryType_,
+  // not raw amount sign), same "Category: Subcategory" chart labels,
+  // already sorted largest-first. Money's own home page (per the
+  // screenshot the user shared) puts this "Spending by category" pie
+  // chart on the home screen, not a separate Reports screen.
+  const spendingByCategory = getEntryMonthlySpendingByCategory_().rows
+    .map(function(row) {
+      return { category: row[0], amount: row[1] };
+    });
+
   return {
     currentCash: currentCash,
     projectedCash: currentCash + unclearedNet,
@@ -1014,7 +1026,8 @@ function apiGetDashboard_() {
     accountBalances: balances.map(function(b) {
       return { account: b.account, balance: b.balance };
     }),
-    recentTransactions: recentTransactions
+    recentTransactions: recentTransactions,
+    spendingByCategory: spendingByCategory
   };
 }
 
