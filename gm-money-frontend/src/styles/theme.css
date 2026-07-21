@@ -371,6 +371,21 @@ body {
   color: #0d47a1;
 }
 
+.gm-status-badge--auto-ready {
+  background: #e8f5e9;
+  color: #1b5e20;
+}
+
+.gm-status-badge--learning {
+  background: #fff4cc;
+  color: #8a6300;
+}
+
+.gm-status-badge--locked {
+  background: #e3f2fd;
+  color: #0d47a1;
+}
+
 /* ============================================================
    Dashboard — the one screen that uses the Windows Phone
    "live tile" look. Scoped entirely under .gm-dashboard so this

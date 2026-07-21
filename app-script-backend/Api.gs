@@ -144,6 +144,24 @@ function handleApiRequest_(e) {
       case "processScheduledTransactionsNow":
         return jsonOutput_(apiProcessScheduledTransactionsNow_());
 
+      case "getMerchantMemory":
+        return jsonOutput_(apiGetMerchantMemory_(payload));
+
+      case "updateMerchantMemory":
+        return jsonOutput_(apiUpdateMerchantMemory_(payload));
+
+      case "lockMerchantMemory":
+        return jsonOutput_(apiLockMerchantMemory_(payload));
+
+      case "unlockMerchantMemory":
+        return jsonOutput_(apiUnlockMerchantMemory_(payload));
+
+      case "deleteMerchantMemory":
+        return jsonOutput_(apiDeleteMerchantMemory_(payload));
+
+      case "rebuildMerchantMemory":
+        return jsonOutput_(apiRebuildMerchantMemory_());
+
       default:
         return jsonError_(
           'Unknown action: "' + action + '".',
@@ -1709,6 +1727,283 @@ function apiProcessScheduledTransactionsNow_() {
   try {
     processDueScheduledTransactionsForSpreadsheet_(SpreadsheetApp.getActiveSpreadsheet());
     return { ok: true, data: { processed: true } };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+/* ============================================================
+   Merchant Memory
+
+   Records (GM_MerchantMemory, via getMerchantMemorySheet_) are only
+   ever created by learnMerchant_() -- transaction entry, bank-review
+   approval, and register matching all already teach it (see
+   apiMatchTransaction_/apiApproveTransaction_ above). There is no
+   "add a merchant manually" path here, matching the Sheets-side
+   Merchant Manager, which only ever edits/locks/unlocks/deletes/
+   rebuilds existing rows.
+
+   Reused verbatim from MerchantMemory.gs: lockMerchantMemory_,
+   unlockMerchantMemory_, deleteMerchantMemory_, rebuildMerchantMemory_
+   -- all operate on an already-normalized Merchant Key, and
+   normalizeMerchantKey_ is idempotent, so passing a stored
+   merchantKey straight through is safe. The list/search/filter/sort
+   logic mirrors refreshMerchantManager_ (MerchantManager.gs) headless
+   -- same filter values, same status logic (merchantManagerStatus_),
+   same sort (locked first, then confidence desc, then name) -- but
+   returns JSON instead of writing to the hidden Sheets-UI sheet.
+============================================================ */
+
+function apiGetMerchantMemory_(payload) {
+  const sheet = getMerchantMemorySheet_();
+  const values = sheet.getDataRange().getValues();
+
+  if (values.length < 2) {
+    return { ok: true, data: { records: [], stats: { merchants: 0, autoLearned: 0, locked: 0 } } };
+  }
+
+  const map = getHeaderMap_(values[0]);
+
+  const records = values.slice(1)
+    .filter(function(row) {
+      return String(row[map["Merchant Key"]] || "").trim() !== "";
+    })
+    .map(function(row) {
+      const confidence = Number(row[map.Confidence] || 0);
+      const locked = String(row[map.Locked] || "").trim().toLowerCase() === "yes";
+      const firstSeen = row[map["First Seen"]];
+      const lastSeen = row[map["Last Seen"]];
+
+      return {
+        merchantKey: String(row[map["Merchant Key"]] || "").trim(),
+        merchant: String(row[map["Preferred Merchant"]] || "").trim(),
+        category: String(row[map.Category] || "").trim(),
+        subcategory: String(row[map.Subcategory] || "").trim(),
+        timesUsed: Number(row[map["Times Used"]] || 0),
+        firstSeen: firstSeen instanceof Date
+          ? Utilities.formatDate(firstSeen, Session.getScriptTimeZone(), "yyyy-MM-dd")
+          : String(firstSeen || ""),
+        lastSeen: lastSeen instanceof Date
+          ? Utilities.formatDate(lastSeen, Session.getScriptTimeZone(), "yyyy-MM-dd")
+          : String(lastSeen || ""),
+        confidence: confidence,
+        locked: locked,
+        status: merchantManagerStatus_(confidence, locked)
+      };
+    });
+
+  const stats = {
+    merchants: records.length,
+    autoLearned: records.filter(function(r) { return r.confidence >= GM.MERCHANT_MEMORY.MIN_AUTO_CONFIDENCE; }).length,
+    locked: records.filter(function(r) { return r.locked; }).length
+  };
+
+  const searchText = normalizeMerchantManagerSearch_(payload.search || "");
+  const filter = String(payload.filter || "All").trim();
+
+  const filtered = records.filter(function(record) {
+    if (searchText) {
+      const haystack = normalizeMerchantManagerSearch_(
+        [record.merchant, record.merchantKey, record.category, record.subcategory].join(" ")
+      );
+      if (haystack.indexOf(searchText) === -1) {
+        return false;
+      }
+    }
+
+    if (filter === "Auto-Ready") {
+      return record.confidence >= GM.MERCHANT_MEMORY.MIN_AUTO_CONFIDENCE;
+    }
+    if (filter === "Learning") {
+      return record.confidence < GM.MERCHANT_MEMORY.MIN_AUTO_CONFIDENCE;
+    }
+    if (filter === "Locked") {
+      return record.locked;
+    }
+    return true;
+  });
+
+  filtered.sort(function(a, b) {
+    if (a.locked !== b.locked) return a.locked ? -1 : 1;
+    if (a.confidence !== b.confidence) return b.confidence - a.confidence;
+    return a.merchant.localeCompare(b.merchant);
+  });
+
+  return { ok: true, data: { records: filtered, stats: stats } };
+}
+
+
+function apiUpdateMerchantMemory_(payload) {
+  const merchantKey = String(payload.merchantKey || "").trim();
+
+  if (!merchantKey) {
+    return { ok: false, code: "VALIDATION_ERROR", error: "Missing merchant key." };
+  }
+
+  const errors = [];
+
+  const preferredMerchant = String(payload.preferredMerchant || "").trim().slice(0, 200);
+  if (!preferredMerchant) {
+    errors.push("Preferred Merchant cannot be blank.");
+  }
+
+  const category = String(payload.category || "").trim();
+  const validCategories = getConfiguredCategoryNames_();
+  if (!category) {
+    errors.push("Choose a category.");
+  } else if (validCategories.indexOf(category) === -1) {
+    errors.push('Unknown category: "' + category + '".');
+  }
+
+  const subcategory = String(payload.subcategory || "").trim();
+  if (subcategory && category) {
+    const validSubs = getConfiguredSubcategoryNames_(category);
+    if (validSubs.indexOf(subcategory) === -1) {
+      errors.push('"' + subcategory + '" is not a subcategory of "' + category + '".');
+    }
+  }
+
+  if (errors.length > 0) {
+    return { ok: false, code: "VALIDATION_ERROR", error: "Could not save.", fieldErrors: errors };
+  }
+
+  const lock = LockService.getScriptLock();
+
+  if (!lock.tryLock(10000)) {
+    return { ok: false, code: "LOCK_TIMEOUT", error: "The system is busy — try again in a moment." };
+  }
+
+  try {
+    const sheet = getMerchantMemorySheet_();
+    const values = sheet.getDataRange().getValues();
+    const map = getHeaderMap_(values[0]);
+
+    let targetRow = -1;
+    const newKey = normalizeMerchantKey_(preferredMerchant);
+
+    for (let i = 1; i < values.length; i++) {
+      const key = String(values[i][map["Merchant Key"]] || "").trim();
+
+      if (key === merchantKey) {
+        targetRow = i + 1;
+      } else if (key === newKey) {
+        return {
+          ok: false,
+          code: "VALIDATION_ERROR",
+          error: 'Another merchant already uses the key derived from "' + preferredMerchant + '".'
+        };
+      }
+    }
+
+    if (targetRow === -1) {
+      return { ok: false, code: "NOT_FOUND", error: "That merchant record could not be found." };
+    }
+
+    sheet.getRange(targetRow, map["Merchant Key"] + 1).setValue(newKey);
+    sheet.getRange(targetRow, map["Preferred Merchant"] + 1).setValue(preferredMerchant);
+    sheet.getRange(targetRow, map.Category + 1).setValue(category);
+    sheet.getRange(targetRow, map.Subcategory + 1).setValue(subcategory);
+    sheet.getRange(targetRow, map["Last Seen"] + 1).setValue(new Date());
+
+    return { ok: true, data: { merchantKey: newKey } };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+function apiLockMerchantMemory_(payload) {
+  const merchantKey = String(payload.merchantKey || "").trim();
+
+  if (!merchantKey) {
+    return { ok: false, code: "VALIDATION_ERROR", error: "Missing merchant key." };
+  }
+
+  const lock = LockService.getScriptLock();
+
+  if (!lock.tryLock(10000)) {
+    return { ok: false, code: "LOCK_TIMEOUT", error: "The system is busy — try again in a moment." };
+  }
+
+  try {
+    const found = lockMerchantMemory_(merchantKey);
+
+    if (!found) {
+      return { ok: false, code: "NOT_FOUND", error: "That merchant record could not be found." };
+    }
+
+    return { ok: true, data: { merchantKey: merchantKey, locked: true } };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+function apiUnlockMerchantMemory_(payload) {
+  const merchantKey = String(payload.merchantKey || "").trim();
+
+  if (!merchantKey) {
+    return { ok: false, code: "VALIDATION_ERROR", error: "Missing merchant key." };
+  }
+
+  const lock = LockService.getScriptLock();
+
+  if (!lock.tryLock(10000)) {
+    return { ok: false, code: "LOCK_TIMEOUT", error: "The system is busy — try again in a moment." };
+  }
+
+  try {
+    const found = unlockMerchantMemory_(merchantKey);
+
+    if (!found) {
+      return { ok: false, code: "NOT_FOUND", error: "That merchant record could not be found." };
+    }
+
+    return { ok: true, data: { merchantKey: merchantKey, locked: false } };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+function apiDeleteMerchantMemory_(payload) {
+  const merchantKey = String(payload.merchantKey || "").trim();
+
+  if (!merchantKey) {
+    return { ok: false, code: "VALIDATION_ERROR", error: "Missing merchant key." };
+  }
+
+  const lock = LockService.getScriptLock();
+
+  if (!lock.tryLock(10000)) {
+    return { ok: false, code: "LOCK_TIMEOUT", error: "The system is busy — try again in a moment." };
+  }
+
+  try {
+    const found = deleteMerchantMemory_(merchantKey);
+
+    if (!found) {
+      return { ok: false, code: "NOT_FOUND", error: "That merchant record could not be found." };
+    }
+
+    return { ok: true, data: { merchantKey: merchantKey } };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+function apiRebuildMerchantMemory_() {
+  const lock = LockService.getScriptLock();
+
+  if (!lock.tryLock(10000)) {
+    return { ok: false, code: "LOCK_TIMEOUT", error: "The system is busy — try again in a moment." };
+  }
+
+  try {
+    rebuildMerchantMemory_();
+    return { ok: true, data: { rebuilt: true } };
   } finally {
     lock.releaseLock();
   }

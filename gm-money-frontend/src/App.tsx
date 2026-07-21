@@ -7,9 +7,10 @@ import { ReviewView } from "./features/review/ReviewView";
 import { DashboardView } from "./features/dashboard/DashboardView";
 import { SettingsView } from "./features/settings/SettingsView";
 import { ScheduledView } from "./features/scheduled/ScheduledView";
+import { MerchantMemoryView } from "./features/merchant-memory/MerchantMemoryView";
 import { useFormOptions } from "./hooks/useFormOptions";
 
-type Screen = "dashboard" | "entry" | "register" | "review" | "scheduled" | "settings";
+type Screen = "dashboard" | "entry" | "register" | "review" | "scheduled" | "merchants" | "settings";
 
 function App() {
   const [authed, setAuthed] = useState(!!getStoredPassword());
@@ -65,6 +66,12 @@ function App() {
             Scheduled
           </button>
           <button
+            className={screen === "merchants" ? "gm-nav-tab gm-nav-tab--active" : "gm-nav-tab"}
+            onClick={() => setScreen("merchants")}
+          >
+            Merchants
+          </button>
+          <button
             className={screen === "settings" ? "gm-nav-tab gm-nav-tab--active" : "gm-nav-tab"}
             onClick={() => setScreen("settings")}
           >
@@ -106,6 +113,10 @@ function App() {
 
         {authed && status === "ready" && options && screen === "scheduled" && (
           <ScheduledView formOptions={options} onAuthFailure={handleAuthFailure} />
+        )}
+
+        {authed && status === "ready" && options && screen === "merchants" && (
+          <MerchantMemoryView formOptions={options} onAuthFailure={handleAuthFailure} />
         )}
 
         {authed && status === "ready" && options && screen === "settings" && (

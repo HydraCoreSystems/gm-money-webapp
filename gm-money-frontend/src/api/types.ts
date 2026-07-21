@@ -175,6 +175,44 @@ export type UpdateScheduledTransactionPayload = ScheduledTransactionPayload & {
   scheduleId: string;
 };
 
+export type MerchantMemoryStatus = "Locked" | "Auto-Ready" | "Learning";
+
+export type MerchantMemoryRecord = {
+  merchantKey: string;
+  merchant: string;
+  category: string;
+  subcategory: string;
+  timesUsed: number;
+  firstSeen: string;
+  lastSeen: string;
+  confidence: number;
+  locked: boolean;
+  status: MerchantMemoryStatus;
+};
+
+export type MerchantMemoryStats = {
+  merchants: number;
+  autoLearned: number;
+  locked: number;
+};
+
+export type MerchantMemoryData = {
+  records: MerchantMemoryRecord[];
+  stats: MerchantMemoryStats;
+};
+
+export type GetMerchantMemoryPayload = {
+  search?: string;
+  filter?: "All" | "Auto-Ready" | "Learning" | "Locked";
+};
+
+export type UpdateMerchantMemoryPayload = {
+  merchantKey: string;
+  preferredMerchant: string;
+  category: string;
+  subcategory: string;
+};
+
 export type AddCategoryResult = {
   name: string;
   type: "Income" | "Expense";
