@@ -4,13 +4,14 @@ import { PasswordGate } from "./auth/PasswordGate";
 import { TransactionEntryForm } from "./features/transaction-entry/TransactionEntryForm";
 import { RegisterView } from "./features/register/RegisterView";
 import { ReviewView } from "./features/review/ReviewView";
+import { DashboardView } from "./features/dashboard/DashboardView";
 import { useFormOptions } from "./hooks/useFormOptions";
 
-type Screen = "entry" | "register" | "review";
+type Screen = "dashboard" | "entry" | "register" | "review";
 
 function App() {
   const [authed, setAuthed] = useState(!!getStoredPassword());
-  const [screen, setScreen] = useState<Screen>("entry");
+  const [screen, setScreen] = useState<Screen>("dashboard");
 
   function handleAuthFailure() {
     clearStoredPassword();
@@ -31,6 +32,12 @@ function App() {
 
       {authed && status === "ready" && options && (
         <div className="gm-nav-tabs">
+          <button
+            className={screen === "dashboard" ? "gm-nav-tab gm-nav-tab--active" : "gm-nav-tab"}
+            onClick={() => setScreen("dashboard")}
+          >
+            Dashboard
+          </button>
           <button
             className={screen === "entry" ? "gm-nav-tab gm-nav-tab--active" : "gm-nav-tab"}
             onClick={() => setScreen("entry")}
@@ -65,6 +72,10 @@ function App() {
           <div className="gm-card">
             <p className="gm-error">{error || "Could not load the app."}</p>
           </div>
+        )}
+
+        {authed && status === "ready" && options && screen === "dashboard" && (
+          <DashboardView onAuthFailure={handleAuthFailure} />
         )}
 
         {authed && status === "ready" && options && screen === "entry" && (

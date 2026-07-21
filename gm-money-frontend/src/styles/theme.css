@@ -370,3 +370,88 @@ body {
   background: #e3f2fd;
   color: #0d47a1;
 }
+
+/* ============================================================
+   Dashboard — the one screen that uses the Windows Phone
+   "live tile" look. Scoped entirely under .gm-dashboard so this
+   never leaks onto Entry/Register/Review, which stay in the calm
+   sage/card language above.
+============================================================ */
+
+.gm-dashboard {
+  width: 100%;
+  max-width: 640px;
+  display: flex;
+  flex-direction: column;
+  gap: 1rem;
+}
+
+.gm-metro-grid {
+  display: grid;
+  grid-template-columns: repeat(2, 1fr);
+  gap: 3px;
+  background: #c9d2c6;
+  padding: 3px;
+  border-radius: var(--gm-radius);
+  overflow: hidden;
+}
+
+.gm-metro-tile {
+  padding: 1rem;
+  color: #ffffff;
+  min-height: 5.5rem;
+  display: flex;
+  flex-direction: column;
+  justify-content: flex-end;
+}
+
+.gm-metro-tile__label {
+  font-size: 0.78rem;
+  font-weight: 600;
+  opacity: 0.9;
+}
+
+.gm-metro-tile__value {
+  font-size: 1.4rem;
+  font-weight: 700;
+}
+
+.gm-metro-tile--cash {
+  background: #008a00;
+}
+
+.gm-metro-tile--projected {
+  background: #0050ef;
+}
+
+.gm-metro-tile--income {
+  background: #00aba9;
+}
+
+.gm-metro-tile--expenses {
+  background: #fa6800;
+}
+
+.gm-metro-tile--review {
+  background: #d80073;
+}
+
+.gm-metro-tile--uncleared {
+  background: #6a00ff;
+}
+
+.gm-dashboard-panel {
+  max-width: none;
+}
+
+.gm-dashboard-balance-row {
+  display: flex;
+  justify-content: space-between;
+  padding: 0.5rem 0.1rem;
+  border-bottom: 1px solid var(--gm-border);
+  font-size: 0.95rem;
+}
+
+.gm-dashboard-balance-row:last-child {
+  border-bottom: none;
+}

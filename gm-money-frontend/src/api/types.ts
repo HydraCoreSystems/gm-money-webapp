@@ -110,3 +110,29 @@ export type ApproveTransactionResult = {
   sourceRow: number;
   transactionKey: string;
 };
+
+export type DashboardRecentTransaction = {
+  date: string;
+  payee: string;
+  category: string;
+  subcategory: string;
+  amount: number;
+  status: RegisterStatus;
+  account: string;
+};
+
+export type DashboardAccountBalance = {
+  account: string;
+  balance: number;
+};
+
+export type DashboardData = {
+  currentCash: number;
+  projectedCash: number;
+  incomeThisMonth: number;
+  expensesThisMonth: number;
+  pendingReviewCount: number;
+  unclearedCount: number;
+  accountBalances: DashboardAccountBalance[];
+  recentTransactions: DashboardRecentTransaction[];
+};
