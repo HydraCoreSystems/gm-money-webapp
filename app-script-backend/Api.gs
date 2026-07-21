@@ -111,6 +111,24 @@ function handleApiRequest_(e) {
       case "getDashboard":
         return jsonOutput_({ ok: true, data: apiGetDashboard_() });
 
+      case "addCategory":
+        return jsonOutput_(apiAddCategory_(payload));
+
+      case "addSubcategory":
+        return jsonOutput_(apiAddSubcategory_(payload));
+
+      case "deleteSubcategory":
+        return jsonOutput_(apiDeleteSubcategory_(payload));
+
+      case "deleteCategory":
+        return jsonOutput_(apiDeleteCategory_(payload));
+
+      case "addPaymentMethod":
+        return jsonOutput_(apiAddPaymentMethod_(payload));
+
+      case "deletePaymentMethod":
+        return jsonOutput_(apiDeletePaymentMethod_(payload));
+
       default:
         return jsonError_(
           'Unknown action: "' + action + '".',
@@ -965,4 +983,432 @@ function apiGetDashboard_() {
     }),
     recentTransactions: recentTransactions
   };
+}
+
+
+/* ============================================================
+   Settings — Category / Subcategory / Payment Method management
+
+   The Settings sheet stores Categories (A4:C100), Payment Methods
+   (D4:D100), Transaction Types (F4:F20), and Frequencies (H4:H20) as
+   different COLUMN ranges on the SAME physical rows — not separate
+   sheets. Never use sheet.deleteRow()/insertRow() here: a whole-row
+   operation would shift every other column's list too. Every write
+   below follows the existing sortCategoriesAlphabetically() pattern:
+   read the full range, modify the in-memory array, clearContent()
+   that exact range, write the array back — scoped to one column range
+   at a time, always compacted (no gaps, since every reader stops at
+   the first blank cell).
+============================================================ */
+
+const GM_CATEGORY_ROW_LIMIT_ = 96;
+
+function getSettingsSheet_() {
+  const sheet = SpreadsheetApp.getActiveSpreadsheet().getSheetByName(GM.SHEETS.SETTINGS);
+
+  if (!sheet) {
+    throw new Error("Settings sheet not found.");
+  }
+
+  return sheet;
+}
+
+
+function writeCategoryStructure_(sheet, rows) {
+  const sorted = sortCategoryStructure_(rows);
+
+  sheet.getRange("A4:C100").clearContent();
+
+  if (sorted.length > 0) {
+    sheet.getRange(4, 1, Math.min(sorted.length, 97), 3).setValues(sorted.slice(0, 97));
+  }
+}
+
+
+function countManualTransactionCategoryUsage_(category, subcategory) {
+  const sheet = getManualTransactionsSheet_();
+  const values = sheet.getDataRange().getValues();
+
+  if (values.length < 2) {
+    return 0;
+  }
+
+  const map = getHeaderMap_(values[0]);
+  const subcategoryColumn = getManualTransactionSubcategoryColumn_(sheet);
+  const cleanCategory = category.toLowerCase();
+  const cleanSubcategory = subcategory ? subcategory.toLowerCase() : "";
+
+  let count = 0;
+
+  for (let i = 1; i < values.length; i++) {
+    const row = values[i];
+
+    if (String(row[map.Category] || "").trim().toLowerCase() !== cleanCategory) {
+      continue;
+    }
+
+    if (cleanSubcategory) {
+      const rowSubcategory = String(row[subcategoryColumn] || "").trim().toLowerCase();
+      if (rowSubcategory !== cleanSubcategory) {
+        continue;
+      }
+    }
+
+    count++;
+  }
+
+  return count;
+}
+
+
+function countTillerCategoryUsage_(category) {
+  const source = getTillerTransactionsSheet_();
+  const values = source.getDataRange().getValues();
+
+  if (values.length < 2) {
+    return 0;
+  }
+
+  const map = getHeaderMap_(values[0]);
+  const cleanCategory = category.toLowerCase();
+  let count = 0;
+
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][map.Category] || "").trim().toLowerCase() === cleanCategory) {
+      count++;
+    }
+  }
+
+  return count;
+}
+
+
+function countTransactionMetaSubcategoryUsage_(subcategory) {
+  const metaSheet = getTransactionMetadataSheet_();
+  const values = metaSheet.getDataRange().getValues();
+
+  if (values.length < 2) {
+    return 0;
+  }
+
+  const map = getHeaderMap_(values[0]);
+  const cleanSubcategory = subcategory.toLowerCase();
+  let count = 0;
+
+  for (let i = 1; i < values.length; i++) {
+    if (String(values[i][map.Subcategory] || "").trim().toLowerCase() === cleanSubcategory) {
+      count++;
+    }
+  }
+
+  return count;
+}
+
+
+function apiAddCategory_(payload) {
+  const name = String(payload.name || "").trim();
+  const type = String(payload.type || "").trim();
+
+  if (!name) {
+    return { ok: false, code: "VALIDATION_ERROR", error: "Enter a category name." };
+  }
+
+  if (type !== "Income" && type !== "Expense") {
+    return { ok: false, code: "VALIDATION_ERROR", error: "Choose Income or Expense." };
+  }
+
+  const lock = LockService.getScriptLock();
+
+  if (!lock.tryLock(10000)) {
+    return { ok: false, code: "LOCK_TIMEOUT", error: "The system is busy — try again in a moment." };
+  }
+
+  try {
+    const sheet = getSettingsSheet_();
+    const rows = getConfiguredCategoryStructure_();
+
+    const exists = rows.some(function(row) {
+      return String(row[0] || "").trim().toLowerCase() === name.toLowerCase();
+    });
+
+    if (exists) {
+      return { ok: false, code: "VALIDATION_ERROR", error: 'Category "' + name + '" already exists.' };
+    }
+
+    if (rows.length >= GM_CATEGORY_ROW_LIMIT_) {
+      return {
+        ok: false,
+        code: "VALIDATION_ERROR",
+        error: "The category list is full. Remove something before adding more."
+      };
+    }
+
+    rows.push([name, "", type]);
+    writeCategoryStructure_(sheet, rows);
+
+    return { ok: true, data: { name: name, type: type } };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+function apiAddSubcategory_(payload) {
+  const category = String(payload.category || "").trim();
+  const subcategory = String(payload.subcategory || "").trim();
+
+  if (!category) {
+    return { ok: false, code: "VALIDATION_ERROR", error: "Choose a category." };
+  }
+
+  if (!subcategory) {
+    return { ok: false, code: "VALIDATION_ERROR", error: "Enter a subcategory name." };
+  }
+
+  const lock = LockService.getScriptLock();
+
+  if (!lock.tryLock(10000)) {
+    return { ok: false, code: "LOCK_TIMEOUT", error: "The system is busy — try again in a moment." };
+  }
+
+  try {
+    const sheet = getSettingsSheet_();
+    const rows = getConfiguredCategoryStructure_();
+
+    const categoryExists = rows.some(function(row) {
+      return String(row[0] || "").trim().toLowerCase() === category.toLowerCase();
+    });
+
+    if (!categoryExists) {
+      return { ok: false, code: "VALIDATION_ERROR", error: 'Unknown category: "' + category + '".' };
+    }
+
+    const subcategoryExists = rows.some(function(row) {
+      return String(row[0] || "").trim().toLowerCase() === category.toLowerCase() &&
+        String(row[1] || "").trim().toLowerCase() === subcategory.toLowerCase();
+    });
+
+    if (subcategoryExists) {
+      return {
+        ok: false,
+        code: "VALIDATION_ERROR",
+        error: '"' + subcategory + '" already exists under "' + category + '".'
+      };
+    }
+
+    if (rows.length >= GM_CATEGORY_ROW_LIMIT_) {
+      return {
+        ok: false,
+        code: "VALIDATION_ERROR",
+        error: "The category list is full. Remove something before adding more."
+      };
+    }
+
+    const type = getConfiguredCategoryType_(category);
+    rows.push([category, subcategory, type]);
+    writeCategoryStructure_(sheet, rows);
+
+    return { ok: true, data: { category: category, subcategory: subcategory } };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+function apiDeleteSubcategory_(payload) {
+  const category = String(payload.category || "").trim();
+  const subcategory = String(payload.subcategory || "").trim();
+
+  if (!category || !subcategory) {
+    return { ok: false, code: "VALIDATION_ERROR", error: "Missing category or subcategory." };
+  }
+
+  const lock = LockService.getScriptLock();
+
+  if (!lock.tryLock(10000)) {
+    return { ok: false, code: "LOCK_TIMEOUT", error: "The system is busy — try again in a moment." };
+  }
+
+  try {
+    const manualUsage = countManualTransactionCategoryUsage_(category, subcategory);
+    const metaUsage = countTransactionMetaSubcategoryUsage_(subcategory);
+    const totalUsage = manualUsage + metaUsage;
+
+    if (totalUsage > 0) {
+      return {
+        ok: false,
+        code: "IN_USE",
+        error: totalUsage + " transaction" + (totalUsage === 1 ? "" : "s") +
+          " use this subcategory — remove or recategorize them first."
+      };
+    }
+
+    const sheet = getSettingsSheet_();
+    const rows = getConfiguredCategoryStructure_().filter(function(row) {
+      return !(
+        String(row[0] || "").trim().toLowerCase() === category.toLowerCase() &&
+        String(row[1] || "").trim().toLowerCase() === subcategory.toLowerCase()
+      );
+    });
+
+    writeCategoryStructure_(sheet, rows);
+
+    return { ok: true, data: { category: category, subcategory: subcategory } };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+function apiDeleteCategory_(payload) {
+  const category = String(payload.category || "").trim();
+
+  if (!category) {
+    return { ok: false, code: "VALIDATION_ERROR", error: "Missing category." };
+  }
+
+  const lock = LockService.getScriptLock();
+
+  if (!lock.tryLock(10000)) {
+    return { ok: false, code: "LOCK_TIMEOUT", error: "The system is busy — try again in a moment." };
+  }
+
+  try {
+    const manualUsage = countManualTransactionCategoryUsage_(category, "");
+    const tillerUsage = countTillerCategoryUsage_(category);
+    const totalUsage = manualUsage + tillerUsage;
+
+    if (totalUsage > 0) {
+      return {
+        ok: false,
+        code: "IN_USE",
+        error: totalUsage + " transaction" + (totalUsage === 1 ? "" : "s") +
+          " use this category — remove or recategorize them first."
+      };
+    }
+
+    const sheet = getSettingsSheet_();
+    const rows = getConfiguredCategoryStructure_().filter(function(row) {
+      return String(row[0] || "").trim().toLowerCase() !== category.toLowerCase();
+    });
+
+    writeCategoryStructure_(sheet, rows);
+
+    return { ok: true, data: { category: category } };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+function apiAddPaymentMethod_(payload) {
+  const name = String(payload.name || "").trim();
+
+  if (!name) {
+    return { ok: false, code: "VALIDATION_ERROR", error: "Enter a payment method name." };
+  }
+
+  const lock = LockService.getScriptLock();
+
+  if (!lock.tryLock(10000)) {
+    return { ok: false, code: "LOCK_TIMEOUT", error: "The system is busy — try again in a moment." };
+  }
+
+  try {
+    const existing = getConfiguredPaymentMethods_();
+
+    const exists = existing.some(function(v) {
+      return v.toLowerCase() === name.toLowerCase();
+    });
+
+    if (exists) {
+      return { ok: false, code: "VALIDATION_ERROR", error: 'Payment method "' + name + '" already exists.' };
+    }
+
+    const range = getSettingsListRange_("Payment Methods");
+    const values = range.getValues();
+    let targetRow = -1;
+
+    for (let i = 0; i < values.length; i++) {
+      if (String(values[i][0] || "").trim() === "") {
+        targetRow = i;
+        break;
+      }
+    }
+
+    if (targetRow === -1) {
+      return { ok: false, code: "VALIDATION_ERROR", error: "The payment methods list is full." };
+    }
+
+    const sheet = getSettingsSheet_();
+    sheet.getRange(4 + targetRow, 4).setValue(name);
+
+    return { ok: true, data: { name: name } };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+function apiDeletePaymentMethod_(payload) {
+  const name = String(payload.name || "").trim();
+
+  if (!name) {
+    return { ok: false, code: "VALIDATION_ERROR", error: "Missing payment method name." };
+  }
+
+  const lock = LockService.getScriptLock();
+
+  if (!lock.tryLock(10000)) {
+    return { ok: false, code: "LOCK_TIMEOUT", error: "The system is busy — try again in a moment." };
+  }
+
+  try {
+    const manualSheet = getManualTransactionsSheet_();
+    const manualValues = manualSheet.getDataRange().getValues();
+    let usage = 0;
+
+    if (manualValues.length >= 2) {
+      const map = getHeaderMap_(manualValues[0]);
+
+      for (let i = 1; i < manualValues.length; i++) {
+        if (String(manualValues[i][map["Payment Method"]] || "").trim().toLowerCase() === name.toLowerCase()) {
+          usage++;
+        }
+      }
+    }
+
+    if (usage > 0) {
+      return {
+        ok: false,
+        code: "IN_USE",
+        error: usage + " transaction" + (usage === 1 ? "" : "s") +
+          " use this payment method — remove or change them first."
+      };
+    }
+
+    const range = getSettingsListRange_("Payment Methods");
+    const values = range.getValues().map(function(row) { return row[0]; });
+
+    const filtered = values.filter(function(v) {
+      return String(v || "").trim().toLowerCase() !== name.toLowerCase();
+    });
+
+    const sheet = getSettingsSheet_();
+    sheet.getRange("D4:D100").clearContent();
+
+    if (filtered.length > 0) {
+      const out = filtered
+        .filter(function(v) { return String(v || "").trim() !== ""; })
+        .map(function(v) { return [v]; });
+
+      if (out.length > 0) {
+        sheet.getRange(4, 4, out.length, 1).setValues(out);
+      }
+    }
+
+    return { ok: true, data: { name: name } };
+  } finally {
+    lock.releaseLock();
+  }
 }
