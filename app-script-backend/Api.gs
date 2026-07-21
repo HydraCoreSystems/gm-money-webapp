@@ -129,6 +129,21 @@ function handleApiRequest_(e) {
       case "deletePaymentMethod":
         return jsonOutput_(apiDeletePaymentMethod_(payload));
 
+      case "getScheduledTransactions":
+        return jsonOutput_({ ok: true, data: apiGetScheduledTransactions_() });
+
+      case "createScheduledTransaction":
+        return jsonOutput_(apiCreateScheduledTransaction_(payload));
+
+      case "updateScheduledTransaction":
+        return jsonOutput_(apiUpdateScheduledTransaction_(payload));
+
+      case "deleteScheduledTransaction":
+        return jsonOutput_(apiDeleteScheduledTransaction_(payload));
+
+      case "processScheduledTransactionsNow":
+        return jsonOutput_(apiProcessScheduledTransactionsNow_());
+
       default:
         return jsonError_(
           'Unknown action: "' + action + '".',
@@ -1408,6 +1423,292 @@ function apiDeletePaymentMethod_(payload) {
     }
 
     return { ok: true, data: { name: name } };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+/* ============================================================
+   Scheduled (recurring) transactions
+
+   Recurrence definitions live in their own dedicated hidden sheet
+   (GM_RecurringTransactions, via getRecurringTransactionsSheet_) --
+   a separate sheet, not sharing rows/columns with anything else, so
+   deleteRow() is safe here (unlike the Settings sheet).
+
+   Generation itself is NOT reimplemented -- it's already fully
+   automated server-side (a daily trigger calling
+   processDueScheduledTransactionsForSpreadsheet_, Automation.gs) and
+   this file only exposes a thin wrapper to run it on demand. This
+   milestone only manages the recurrence definitions.
+
+   Unlike the original saveScheduledTransaction() (which accepts a
+   raw, already-signed Amount typed directly into a cell with no
+   category-type check at all), every write here takes an UNSIGNED
+   amount and derives the sign from getConfiguredCategoryType_ --
+   same anti-mismatch principle as apiCreateTransaction_.
+============================================================ */
+
+function apiGetScheduledTransactions_() {
+  const sheet = getRecurringTransactionsSheet_();
+  const values = sheet.getDataRange().getValues();
+
+  if (values.length < 2) {
+    return [];
+  }
+
+  const map = getHeaderMap_(values[0]);
+
+  return values.slice(1).map(function(row) {
+    const nextDue = row[map["Next Due"]];
+
+    return {
+      scheduleId: String(row[map["Schedule ID"]] || ""),
+      payee: String(row[map.Payee] || ""),
+      amount: Number(row[map.Amount] || 0),
+      account: String(row[map.Account] || ""),
+      category: String(row[map.Category] || ""),
+      subcategory: String(row[map.Subcategory] || ""),
+      paymentMethod: String(row[map["Payment Method"]] || ""),
+      frequency: String(row[map.Frequency] || ""),
+      nextDue: nextDue instanceof Date
+        ? Utilities.formatDate(nextDue, Session.getScriptTimeZone(), "yyyy-MM-dd")
+        : String(nextDue || ""),
+      active: String(row[map.Active] || "").trim() === "Yes",
+      autoCreate: String(row[map["Auto Create"]] || "").trim() === "Yes",
+      notes: String(row[map.Notes] || "")
+    };
+  });
+}
+
+
+function buildScheduledTransactionValues_(payload) {
+  const errors = [];
+
+  const payee = String(payload.payee || "").trim().slice(0, 200);
+  if (!payee) {
+    errors.push("Enter a payee.");
+  }
+
+  const enteredAmount = Number(payload.amount);
+  if (!isFinite(enteredAmount) || enteredAmount <= 0) {
+    errors.push("Enter an amount greater than zero.");
+  }
+
+  const account = String(payload.account || "").trim();
+  const accounts = getEntryAccountNames_();
+  if (!account) {
+    errors.push("Choose an account.");
+  } else if (accounts.indexOf(account) === -1) {
+    errors.push('Unknown account: "' + account + '".');
+  }
+
+  const category = String(payload.category || "").trim();
+  const validCategories = getConfiguredCategoryNames_();
+  if (!category) {
+    errors.push("Choose a category.");
+  } else if (validCategories.indexOf(category) === -1) {
+    errors.push('Unknown category: "' + category + '".');
+  }
+
+  const subcategory = String(payload.subcategory || "").trim();
+  if (subcategory && category) {
+    const validSubs = getConfiguredSubcategoryNames_(category);
+    if (validSubs.indexOf(subcategory) === -1) {
+      errors.push('"' + subcategory + '" is not a subcategory of "' + category + '".');
+    }
+  }
+
+  const paymentMethod = String(payload.paymentMethod || "").trim();
+  const validMethods = getConfiguredPaymentMethods_();
+  if (!paymentMethod) {
+    errors.push("Choose a payment method.");
+  } else if (validMethods.indexOf(paymentMethod) === -1) {
+    errors.push('Unknown payment method: "' + paymentMethod + '".');
+  }
+
+  const frequency = String(payload.frequency || "").trim();
+  if (GM.RECURRING_FREQUENCIES.indexOf(frequency) === -1) {
+    errors.push("Choose a valid frequency.");
+  }
+
+  const nextDue = parseDateOnly_(payload.nextDue);
+  if (!nextDue) {
+    errors.push("Enter a valid next due date.");
+  }
+
+  const active = payload.active === false ? "No" : "Yes";
+  const autoCreate = payload.autoCreate === true ? "Yes" : "No";
+  const notes = String(payload.notes || "").trim().slice(0, 1000);
+
+  if (errors.length > 0) {
+    return { errors: errors };
+  }
+
+  const type = getConfiguredCategoryType_(category);
+  const signedAmount = type === "Income" ? Math.abs(enteredAmount) : -Math.abs(enteredAmount);
+
+  return {
+    errors: [],
+    values: {
+      payee: payee,
+      amount: signedAmount,
+      account: account,
+      category: category,
+      subcategory: subcategory,
+      paymentMethod: paymentMethod,
+      frequency: frequency,
+      nextDue: nextDue,
+      active: active,
+      autoCreate: autoCreate,
+      notes: notes
+    }
+  };
+}
+
+
+function apiCreateScheduledTransaction_(payload) {
+  const built = buildScheduledTransactionValues_(payload);
+
+  if (built.errors.length > 0) {
+    return { ok: false, code: "VALIDATION_ERROR", error: "Could not save.", fieldErrors: built.errors };
+  }
+
+  const values = built.values;
+  const lock = LockService.getScriptLock();
+
+  if (!lock.tryLock(10000)) {
+    return { ok: false, code: "LOCK_TIMEOUT", error: "The system is busy — try again in a moment." };
+  }
+
+  try {
+    const sheet = getRecurringTransactionsSheet_();
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const map = getHeaderMap_(headers);
+
+    const scheduleId = createRecurringTransactionId_();
+    const row = new Array(sheet.getLastColumn()).fill("");
+
+    row[map["Schedule ID"]] = scheduleId;
+    row[map.Payee] = values.payee;
+    row[map.Amount] = values.amount;
+    row[map.Account] = values.account;
+    row[map.Category] = values.category;
+    row[map.Subcategory] = values.subcategory;
+    row[map["Payment Method"]] = values.paymentMethod;
+    row[map.Frequency] = values.frequency;
+    row[map["Next Due"]] = values.nextDue;
+    row[map.Active] = values.active;
+    row[map["Auto Create"]] = values.autoCreate;
+    row[map.Notes] = values.notes;
+    row[map["Updated By"]] = "Web App";
+    row[map["Updated At"]] = new Date();
+
+    sheet.getRange(sheet.getLastRow() + 1, 1, 1, row.length).setValues([row]);
+
+    return { ok: true, data: { scheduleId: scheduleId } };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+function apiUpdateScheduledTransaction_(payload) {
+  const scheduleId = String(payload.scheduleId || "").trim();
+
+  if (!scheduleId) {
+    return { ok: false, code: "VALIDATION_ERROR", error: "Missing schedule ID." };
+  }
+
+  const built = buildScheduledTransactionValues_(payload);
+
+  if (built.errors.length > 0) {
+    return { ok: false, code: "VALIDATION_ERROR", error: "Could not save.", fieldErrors: built.errors };
+  }
+
+  const values = built.values;
+  const lock = LockService.getScriptLock();
+
+  if (!lock.tryLock(10000)) {
+    return { ok: false, code: "LOCK_TIMEOUT", error: "The system is busy — try again in a moment." };
+  }
+
+  try {
+    const sheet = getRecurringTransactionsSheet_();
+    const rowNumber = findRecurringTransactionRowById_(scheduleId);
+
+    if (!rowNumber) {
+      return { ok: false, code: "NOT_FOUND", error: "That scheduled transaction could not be found." };
+    }
+
+    const headers = sheet.getRange(1, 1, 1, sheet.getLastColumn()).getValues()[0];
+    const map = getHeaderMap_(headers);
+    const existing = sheet.getRange(rowNumber, 1, 1, sheet.getLastColumn()).getValues()[0];
+
+    existing[map.Payee] = values.payee;
+    existing[map.Amount] = values.amount;
+    existing[map.Account] = values.account;
+    existing[map.Category] = values.category;
+    existing[map.Subcategory] = values.subcategory;
+    existing[map["Payment Method"]] = values.paymentMethod;
+    existing[map.Frequency] = values.frequency;
+    existing[map["Next Due"]] = values.nextDue;
+    existing[map.Active] = values.active;
+    existing[map["Auto Create"]] = values.autoCreate;
+    existing[map.Notes] = values.notes;
+    existing[map["Updated By"]] = "Web App";
+    existing[map["Updated At"]] = new Date();
+
+    sheet.getRange(rowNumber, 1, 1, existing.length).setValues([existing]);
+
+    return { ok: true, data: { scheduleId: scheduleId } };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+function apiDeleteScheduledTransaction_(payload) {
+  const scheduleId = String(payload.scheduleId || "").trim();
+
+  if (!scheduleId) {
+    return { ok: false, code: "VALIDATION_ERROR", error: "Missing schedule ID." };
+  }
+
+  const lock = LockService.getScriptLock();
+
+  if (!lock.tryLock(10000)) {
+    return { ok: false, code: "LOCK_TIMEOUT", error: "The system is busy — try again in a moment." };
+  }
+
+  try {
+    const sheet = getRecurringTransactionsSheet_();
+    const rowNumber = findRecurringTransactionRowById_(scheduleId);
+
+    if (!rowNumber) {
+      return { ok: false, code: "NOT_FOUND", error: "That scheduled transaction could not be found." };
+    }
+
+    sheet.deleteRow(rowNumber);
+
+    return { ok: true, data: { scheduleId: scheduleId } };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+function apiProcessScheduledTransactionsNow_() {
+  const lock = LockService.getScriptLock();
+
+  if (!lock.tryLock(10000)) {
+    return { ok: false, code: "LOCK_TIMEOUT", error: "The system is busy — try again in a moment." };
+  }
+
+  try {
+    processDueScheduledTransactionsForSpreadsheet_(SpreadsheetApp.getActiveSpreadsheet());
+    return { ok: true, data: { processed: true } };
   } finally {
     lock.releaseLock();
   }
