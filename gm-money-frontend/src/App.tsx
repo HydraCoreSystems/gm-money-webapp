@@ -6,9 +6,10 @@ import { RegisterView } from "./features/register/RegisterView";
 import { ReviewView } from "./features/review/ReviewView";
 import { DashboardView } from "./features/dashboard/DashboardView";
 import { SettingsView } from "./features/settings/SettingsView";
+import { ScheduledView } from "./features/scheduled/ScheduledView";
 import { useFormOptions } from "./hooks/useFormOptions";
 
-type Screen = "dashboard" | "entry" | "register" | "review" | "settings";
+type Screen = "dashboard" | "entry" | "register" | "review" | "scheduled" | "settings";
 
 function App() {
   const [authed, setAuthed] = useState(!!getStoredPassword());
@@ -58,6 +59,12 @@ function App() {
             Review
           </button>
           <button
+            className={screen === "scheduled" ? "gm-nav-tab gm-nav-tab--active" : "gm-nav-tab"}
+            onClick={() => setScreen("scheduled")}
+          >
+            Scheduled
+          </button>
+          <button
             className={screen === "settings" ? "gm-nav-tab gm-nav-tab--active" : "gm-nav-tab"}
             onClick={() => setScreen("settings")}
           >
@@ -95,6 +102,10 @@ function App() {
 
         {authed && status === "ready" && options && screen === "review" && (
           <ReviewView formOptions={options} onAuthFailure={handleAuthFailure} />
+        )}
+
+        {authed && status === "ready" && options && screen === "scheduled" && (
+          <ScheduledView formOptions={options} onAuthFailure={handleAuthFailure} />
         )}
 
         {authed && status === "ready" && options && screen === "settings" && (

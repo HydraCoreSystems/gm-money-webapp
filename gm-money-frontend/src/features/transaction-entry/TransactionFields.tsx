@@ -1,3 +1,4 @@
+import { useId } from "react";
 import type { FormOptions } from "../../api/types";
 import { CategoryPicker } from "./CategoryPicker";
 
@@ -40,6 +41,7 @@ export function TransactionFields({
   notes,
   onNotesChange,
 }: Props) {
+  const uid = useId();
   const preview =
     type && amountText
       ? `${type === "Income" ? "+" : "-"}$${Number(amountText || 0).toFixed(2)} (${type})`
@@ -48,9 +50,9 @@ export function TransactionFields({
   return (
     <>
       <div className="gm-field">
-        <label htmlFor="date">Date</label>
+        <label htmlFor={`${uid}-date`}>Date</label>
         <input
-          id="date"
+          id={`${uid}-date`}
           type="date"
           value={date}
           onChange={(e) => onDateChange(e.target.value)}
@@ -59,8 +61,8 @@ export function TransactionFields({
       </div>
 
       <div className="gm-field">
-        <label htmlFor="account">Account</label>
-        <select id="account" value={account} onChange={(e) => onAccountChange(e.target.value)} required>
+        <label htmlFor={`${uid}-account`}>Account</label>
+        <select id={`${uid}-account`} value={account} onChange={(e) => onAccountChange(e.target.value)} required>
           <option value="" disabled>
             Choose an account…
           </option>
@@ -73,9 +75,9 @@ export function TransactionFields({
       </div>
 
       <div className="gm-field">
-        <label htmlFor="payee">Payee</label>
+        <label htmlFor={`${uid}-payee`}>Payee</label>
         <input
-          id="payee"
+          id={`${uid}-payee`}
           type="text"
           value={payee}
           onChange={(e) => onPayeeChange(e.target.value)}
@@ -84,9 +86,9 @@ export function TransactionFields({
       </div>
 
       <div className="gm-field">
-        <label htmlFor="amount">Amount</label>
+        <label htmlFor={`${uid}-amount`}>Amount</label>
         <input
-          id="amount"
+          id={`${uid}-amount`}
           type="number"
           inputMode="decimal"
           step="0.01"
@@ -109,9 +111,9 @@ export function TransactionFields({
       )}
 
       <div className="gm-field">
-        <label htmlFor="paymentMethod">Payment Method</label>
+        <label htmlFor={`${uid}-paymentMethod`}>Payment Method</label>
         <select
-          id="paymentMethod"
+          id={`${uid}-paymentMethod`}
           value={paymentMethod}
           onChange={(e) => onPaymentMethodChange(e.target.value)}
           required
@@ -128,8 +130,8 @@ export function TransactionFields({
       </div>
 
       <div className="gm-field">
-        <label htmlFor="notes">Notes</label>
-        <textarea id="notes" value={notes} onChange={(e) => onNotesChange(e.target.value)} />
+        <label htmlFor={`${uid}-notes`}>Notes</label>
+        <textarea id={`${uid}-notes`} value={notes} onChange={(e) => onNotesChange(e.target.value)} />
       </div>
     </>
   );

@@ -1,4 +1,4 @@
-import type { ChangeEvent } from "react";
+import { useId, type ChangeEvent } from "react";
 import type { CategoryGroup } from "../../api/types";
 
 type Props = {
@@ -9,6 +9,7 @@ type Props = {
 };
 
 export function CategoryPicker({ groups, category, subcategory, onChange }: Props) {
+  const uid = useId();
   const selectedGroup = groups.find((g) => g.categories.some((c) => c.name === category));
   const selectedCategory = selectedGroup?.categories.find((c) => c.name === category);
 
@@ -27,8 +28,8 @@ export function CategoryPicker({ groups, category, subcategory, onChange }: Prop
   return (
     <>
       <div className="gm-field">
-        <label htmlFor="category">Category</label>
-        <select id="category" value={category} onChange={handleCategoryChange} required>
+        <label htmlFor={`${uid}-category`}>Category</label>
+        <select id={`${uid}-category`} value={category} onChange={handleCategoryChange} required>
           <option value="" disabled>
             Choose a category…
           </option>
@@ -46,8 +47,8 @@ export function CategoryPicker({ groups, category, subcategory, onChange }: Prop
 
       {selectedCategory && selectedCategory.subcategories.length > 0 && (
         <div className="gm-field">
-          <label htmlFor="subcategory">Subcategory</label>
-          <select id="subcategory" value={subcategory} onChange={handleSubcategoryChange}>
+          <label htmlFor={`${uid}-subcategory`}>Subcategory</label>
+          <select id={`${uid}-subcategory`} value={subcategory} onChange={handleSubcategoryChange}>
             <option value="">(none)</option>
             {selectedCategory.subcategories.map((sub) => (
               <option key={sub} value={sub}>

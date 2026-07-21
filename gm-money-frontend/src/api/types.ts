@@ -142,6 +142,39 @@ export type AddCategoryPayload = {
   type: "Income" | "Expense";
 };
 
+export type ScheduledTransaction = {
+  scheduleId: string;
+  payee: string;
+  amount: number;
+  account: string;
+  category: string;
+  subcategory: string;
+  paymentMethod: string;
+  frequency: string;
+  nextDue: string;
+  active: boolean;
+  autoCreate: boolean;
+  notes: string;
+};
+
+export type ScheduledTransactionPayload = {
+  payee: string;
+  amount: number;
+  account: string;
+  category: string;
+  subcategory: string;
+  paymentMethod: string;
+  frequency: string;
+  nextDue: string;
+  active: boolean;
+  autoCreate: boolean;
+  notes: string;
+};
+
+export type UpdateScheduledTransactionPayload = ScheduledTransactionPayload & {
+  scheduleId: string;
+};
+
 export type AddCategoryResult = {
   name: string;
   type: "Income" | "Expense";
