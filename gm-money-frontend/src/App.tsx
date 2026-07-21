@@ -5,9 +5,10 @@ import { TransactionEntryForm } from "./features/transaction-entry/TransactionEn
 import { RegisterView } from "./features/register/RegisterView";
 import { ReviewView } from "./features/review/ReviewView";
 import { DashboardView } from "./features/dashboard/DashboardView";
+import { SettingsView } from "./features/settings/SettingsView";
 import { useFormOptions } from "./hooks/useFormOptions";
 
-type Screen = "dashboard" | "entry" | "register" | "review";
+type Screen = "dashboard" | "entry" | "register" | "review" | "settings";
 
 function App() {
   const [authed, setAuthed] = useState(!!getStoredPassword());
@@ -56,6 +57,12 @@ function App() {
           >
             Review
           </button>
+          <button
+            className={screen === "settings" ? "gm-nav-tab gm-nav-tab--active" : "gm-nav-tab"}
+            onClick={() => setScreen("settings")}
+          >
+            Settings
+          </button>
         </div>
       )}
 
@@ -88,6 +95,10 @@ function App() {
 
         {authed && status === "ready" && options && screen === "review" && (
           <ReviewView formOptions={options} onAuthFailure={handleAuthFailure} />
+        )}
+
+        {authed && status === "ready" && options && screen === "settings" && (
+          <SettingsView onAuthFailure={handleAuthFailure} />
         )}
       </div>
     </div>

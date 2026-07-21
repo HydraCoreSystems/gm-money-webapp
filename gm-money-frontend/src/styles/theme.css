@@ -455,3 +455,83 @@ body {
 .gm-dashboard-balance-row:last-child {
   border-bottom: none;
 }
+
+/* ============================================================
+   Settings
+============================================================ */
+
+.gm-settings-add-row {
+  display: flex;
+  gap: 0.5rem;
+  align-items: center;
+  margin-bottom: 1rem;
+  flex-wrap: wrap;
+}
+
+.gm-settings-add-row input {
+  flex: 1;
+  min-width: 10rem;
+  padding: 0.55rem 0.7rem;
+  border: 1px solid var(--gm-border);
+  border-radius: 8px;
+  background: var(--gm-surface);
+  color: var(--gm-text);
+  font-size: 0.95rem;
+}
+
+.gm-settings-add-row select {
+  padding: 0.55rem 0.5rem;
+  border: 1px solid var(--gm-border);
+  border-radius: 8px;
+  background: var(--gm-surface);
+  color: var(--gm-text);
+}
+
+.gm-settings-add-row--sub {
+  margin-bottom: 0.5rem;
+}
+
+.gm-settings-group {
+  margin-bottom: 1.25rem;
+}
+
+.gm-settings-group h4 {
+  color: var(--gm-text-muted);
+  font-size: 0.85rem;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  margin-bottom: 0.5rem;
+}
+
+.gm-settings-category {
+  border: 1px solid var(--gm-border);
+  border-radius: 8px;
+  padding: 0.75rem;
+  margin-bottom: 0.75rem;
+}
+
+.gm-settings-category__header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 0.5rem;
+}
+
+.gm-settings-subcategory-list {
+  list-style: none;
+  margin: 0 0 0.5rem;
+  padding: 0;
+}
+
+.gm-settings-subcategory-list li {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  padding: 0.35rem 0;
+  border-bottom: 1px solid var(--gm-border);
+  font-size: 0.9rem;
+}
+
+.gm-settings-subcategory-list li:last-child {
+  border-bottom: none;
+}

@@ -136,3 +136,40 @@ export type DashboardData = {
   accountBalances: DashboardAccountBalance[];
   recentTransactions: DashboardRecentTransaction[];
 };
+
+export type AddCategoryPayload = {
+  name: string;
+  type: "Income" | "Expense";
+};
+
+export type AddCategoryResult = {
+  name: string;
+  type: "Income" | "Expense";
+};
+
+export type AddSubcategoryPayload = {
+  category: string;
+  subcategory: string;
+};
+
+export type AddSubcategoryResult = {
+  category: string;
+  subcategory: string;
+};
+
+export type DeleteSubcategoryPayload = {
+  category: string;
+  subcategory: string;
+};
+
+export type DeleteCategoryPayload = {
+  category: string;
+};
+
+export type AddPaymentMethodPayload = {
+  name: string;
+};
+
+export type DeletePaymentMethodPayload = {
+  name: string;
+};
