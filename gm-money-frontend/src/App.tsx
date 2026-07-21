@@ -31,7 +31,7 @@ function App() {
 
   return (
     <div className="gm-app">
-      <div className="gm-header-bar">Gathering Moss Financial Center</div>
+      <div className="gm-header-bar">GM Money</div>
 
       {authed && status === "ready" && options && (
         <div className="gm-nav-tabs">
