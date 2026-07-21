@@ -4,13 +4,16 @@ import type { FormOptions } from "../api/types";
 
 type Status = "loading" | "ready" | "error";
 
-export function useFormOptions(onAuthFailure: () => void) {
+export function useFormOptions(enabled: boolean, onAuthFailure: () => void) {
   const [status, setStatus] = useState<Status>("loading");
   const [options, setOptions] = useState<FormOptions | null>(null);
   const [error, setError] = useState("");
 
   useEffect(() => {
+    if (!enabled) return;
+
     let cancelled = false;
+    setStatus("loading");
 
     async function load() {
       const result = await callApi<FormOptions>("getFormOptions");
@@ -37,7 +40,7 @@ export function useFormOptions(onAuthFailure: () => void) {
       cancelled = true;
     };
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [enabled]);
 
   return { status, options, error };
 }

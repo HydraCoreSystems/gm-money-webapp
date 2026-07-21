@@ -27,6 +27,13 @@ const PIE_COLORS = [
   "#647687",
 ];
 
+// Money's own home screen (per the screenshot the user shared) only
+// shows a handful of pie slices plus a "More…" catch-all — a full
+// category breakdown (this data has 30+ real categories some months)
+// is unreadable as a pie. Same idea here: top N by amount, everything
+// else rolled into a single "Other" slice.
+const TOP_CATEGORY_COUNT = 8;
+
 type Props = {
   onAuthFailure: () => void;
 };
@@ -83,6 +90,13 @@ export function DashboardView({ onAuthFailure }: Props) {
     );
   }
 
+  // Already sorted largest-first by the backend.
+  const topCategories = data.spendingByCategory.slice(0, TOP_CATEGORY_COUNT);
+  const otherCategories = data.spendingByCategory.slice(TOP_CATEGORY_COUNT);
+  const otherTotal = otherCategories.reduce((sum, c) => sum + c.amount, 0);
+  const chartCategories =
+    otherTotal > 0 ? [...topCategories, { category: "Other", amount: otherTotal }] : topCategories;
+
   return (
     <div className="gm-dashboard">
       <div className="gm-metro-grid">
@@ -114,23 +128,26 @@ export function DashboardView({ onAuthFailure }: Props) {
 
       <div className="gm-card gm-card--wide gm-dashboard-panel">
         <h3 style={{ marginTop: 0 }}>Spending by Category</h3>
-        {data.spendingByCategory.length === 0 ? (
+        {chartCategories.length === 0 ? (
           <p>No expenses recorded yet this month.</p>
         ) : (
           <>
-            <div style={{ width: "100%", height: 220 }}>
+            <div style={{ width: "100%", height: 260 }}>
               <ResponsiveContainer>
                 <PieChart>
                   <Pie
-                    data={data.spendingByCategory}
+                    data={chartCategories}
                     dataKey="amount"
                     nameKey="category"
-                    innerRadius={50}
-                    outerRadius={90}
+                    innerRadius={60}
+                    outerRadius={110}
                     isAnimationActive={false}
                   >
-                    {data.spendingByCategory.map((entry, index) => (
-                      <Cell key={entry.category} fill={PIE_COLORS[index % PIE_COLORS.length]} />
+                    {chartCategories.map((entry, index) => (
+                      <Cell
+                        key={entry.category}
+                        fill={entry.category === "Other" ? "#647687" : PIE_COLORS[index % PIE_COLORS.length]}
+                      />
                     ))}
                   </Pie>
                   <Tooltip formatter={(value: number) => formatMoney(value)} />
@@ -138,7 +155,7 @@ export function DashboardView({ onAuthFailure }: Props) {
               </ResponsiveContainer>
             </div>
             <div className="gm-register-list">
-              {data.spendingByCategory.map((entry, index) => (
+              {chartCategories.map((entry, index) => (
                 <div key={entry.category} className="gm-dashboard-balance-row">
                   <span>
                     <span
@@ -147,11 +164,13 @@ export function DashboardView({ onAuthFailure }: Props) {
                         width: "0.7rem",
                         height: "0.7rem",
                         borderRadius: "50%",
-                        background: PIE_COLORS[index % PIE_COLORS.length],
+                        background: entry.category === "Other" ? "#647687" : PIE_COLORS[index % PIE_COLORS.length],
                         marginRight: "0.5rem",
                       }}
                     />
-                    {entry.category}
+                    {entry.category === "Other"
+                      ? `Other (${otherCategories.length} categor${otherCategories.length === 1 ? "y" : "ies"})`
+                      : entry.category}
                   </span>
                   <span>{formatMoney(entry.amount)}</span>
                 </div>

@@ -27,7 +27,7 @@ function App() {
     setAuthed(true);
   }
 
-  const { status, options, error } = useFormOptions(handleAuthFailure);
+  const { status, options, error } = useFormOptions(authed, handleAuthFailure);
 
   return (
     <div className="gm-app">
