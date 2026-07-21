@@ -171,22 +171,39 @@ clean manual payee text and the messy raw bank description — this was a
 real bug that had to be fixed (only teaching the clean side meant the ugly
 bank text never got recognized next time it appeared).
 
-## Design language (carried over from the Sheets build, worth preserving)
+## Design language (amended 2026-07-21 — read this whole section, it reverses part of the original brief)
 
-- **Brand identity:** a moss/forest green palette (`#1F5A36` primary,
-  `#123D25` deep header, `#2E7048` accent), meant to evoke the business name
-  ("Gathering Moss") and tie back to Microsoft Money's own understated,
-  professional look — not a flashy consumer fintech app.
-- The owner also loved a Windows Phone "live tile" aesthetic for **one**
-  screen only (the dashboard/home summary) — bold flat color blocks, no
-  gradients, thin dark gutters between tiles. He was explicit that tiles
-  do **not** belong on functional/entry screens, only on the at-a-glance
-  summary view. Everywhere else should stay in the calmer green/sage,
-  card-based language.
-- Red for negative amounts, green for positive — kept as functional
-  color, not merged into the decorative palette (this distinction matters:
-  decorative colors were made intentionally muted/dark; status colors like
-  red/green need to stay legible and conventional).
+**"Money with modern amenities" means the proven functional patterns
+(nested category picker, unified ledger, at-a-glance dashboard), not
+Money's actual circa-2007 flat, spartan visual restraint.** Early in this
+rebuild, "not a flashy consumer fintech app" and "no gradients" were taken
+too literally, and the shipped result read as plain/dated rather than
+calm-and-deliberate. The owner corrected this explicitly: **he wants it to
+look and feel like a genuinely modern, pretty, visual app — gradients and
+some real visual flashiness are wanted, not avoided** — while keeping
+everything that made Money's actual mechanics great (the ledger, the
+category tree, the at-a-glance dashboard). Visual restraint was never the
+point; a spreadsheet-turned-app that finally looks and feels like a real,
+polished 2020s product is the point.
+
+- **Brand identity stays**: the moss/forest green palette (`#1F5A36`
+  primary, `#123D25` deep header, `#2E7048` accent) is still the anchor —
+  it ties to the business name ("Gathering Moss") and shouldn't be
+  abandoned. But it should now be used with real visual depth: gradients,
+  shadows/elevation, richer card treatment, smoother interactions — not
+  flat single-color fills everywhere.
+- **Gradients and "flashiness" are now explicitly wanted**, including on
+  the dashboard's live-tile-style summary screen (previously specified as
+  flat-color-only with no gradients — that restriction is lifted). Tiles
+  can have real depth/gradient treatment now. Whether other screens
+  (Entry, Register, Settings, etc.) should also pick up more visual
+  richness beyond the dashboard, or whether the dashboard stays the one
+  "bold" screen while the rest stay calmer-but-polished, is an open
+  design question to resolve with the owner before a broad rewrite — not
+  something to assume either way.
+- Red for negative amounts, green for positive — still kept as functional,
+  legible, conventional color, distinct from whatever the decorative
+  palette becomes.
 
 ## Known pain points this rebuild should specifically solve
 

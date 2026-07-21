@@ -8,24 +8,20 @@ function formatMoney(amount: number): string {
   return `${sign}$${Math.abs(amount).toFixed(2)}`;
 }
 
-// Reuses the same Windows Phone "live tile" color set as the metro
-// tiles above, since the pie chart lives on this one live-tile screen
-// too (per CLAUDE.md, that look is deliberately scoped to Dashboard
-// only) — not the calmer moss palette used everywhere else.
-const PIE_COLORS = [
-  "#008a00",
-  "#0050ef",
-  "#00aba9",
-  "#fa6800",
-  "#d80073",
-  "#6a00ff",
-  "#a4c400",
-  "#1ba1e2",
-  "#aa00ff",
-  "#f0a30a",
-  "#a20025",
-  "#647687",
+// Each pie slice gets its own gradient (defined once below, referenced
+// by id) rather than a flat fill — matches the gradient/depth language
+// used everywhere else on this screen.
+const PIE_GRADIENTS = [
+  ["#1c7a4a", "#52b788"],
+  ["#d9a441", "#f0cd83"],
+  ["#a8391f", "#e0703f"],
+  ["#123d25", "#2e8b57"],
+  ["#7a2456", "#c34b8e"],
+  ["#3d3480", "#7c5cd9"],
+  ["#0f6e56", "#1d9e75"],
+  ["#185fa5", "#378add"],
 ];
+const PIE_OTHER_GRADIENT = ["#5f6f65", "#8a978d"];
 
 // Money's own home screen (per the screenshot the user shared) only
 // shows a handful of pie slices plus a "More…" catch-all — a full
@@ -99,15 +95,22 @@ export function DashboardView({ onAuthFailure }: Props) {
 
   return (
     <div className="gm-dashboard">
+      <div className="gm-dashboard-hero">
+        <div className="gm-dashboard-hero__row">
+          <div>
+            <div className="gm-dashboard-hero__label">Current Cash</div>
+            <div className="gm-dashboard-hero__value">{formatMoney(data.currentCash)}</div>
+          </div>
+          <div>
+            <div className="gm-dashboard-hero__label">Projected Cash</div>
+            <div className="gm-dashboard-hero__value gm-dashboard-hero__value--secondary">
+              {formatMoney(data.projectedCash)}
+            </div>
+          </div>
+        </div>
+      </div>
+
       <div className="gm-metro-grid">
-        <div className="gm-metro-tile gm-metro-tile--cash">
-          <div className="gm-metro-tile__label">Current Cash</div>
-          <div className="gm-metro-tile__value">{formatMoney(data.currentCash)}</div>
-        </div>
-        <div className="gm-metro-tile gm-metro-tile--projected">
-          <div className="gm-metro-tile__label">Projected Cash</div>
-          <div className="gm-metro-tile__value">{formatMoney(data.projectedCash)}</div>
-        </div>
         <div className="gm-metro-tile gm-metro-tile--income">
           <div className="gm-metro-tile__label">Income This Month</div>
           <div className="gm-metro-tile__value">{formatMoney(data.incomeThisMonth)}</div>
@@ -135,6 +138,18 @@ export function DashboardView({ onAuthFailure }: Props) {
             <div style={{ width: "100%", height: 260 }}>
               <ResponsiveContainer>
                 <PieChart>
+                  <defs>
+                    {PIE_GRADIENTS.map(([from, to], index) => (
+                      <linearGradient key={index} id={`pieGrad${index}`} x1="0%" y1="0%" x2="100%" y2="100%">
+                        <stop offset="0%" stopColor={from} />
+                        <stop offset="100%" stopColor={to} />
+                      </linearGradient>
+                    ))}
+                    <linearGradient id="pieGradOther" x1="0%" y1="0%" x2="100%" y2="100%">
+                      <stop offset="0%" stopColor={PIE_OTHER_GRADIENT[0]} />
+                      <stop offset="100%" stopColor={PIE_OTHER_GRADIENT[1]} />
+                    </linearGradient>
+                  </defs>
                   <Pie
                     data={chartCategories}
                     dataKey="amount"
@@ -146,7 +161,7 @@ export function DashboardView({ onAuthFailure }: Props) {
                     {chartCategories.map((entry, index) => (
                       <Cell
                         key={entry.category}
-                        fill={entry.category === "Other" ? "#647687" : PIE_COLORS[index % PIE_COLORS.length]}
+                        fill={entry.category === "Other" ? "url(#pieGradOther)" : `url(#pieGrad${index % PIE_GRADIENTS.length})`}
                       />
                     ))}
                   </Pie>
@@ -164,7 +179,10 @@ export function DashboardView({ onAuthFailure }: Props) {
                         width: "0.7rem",
                         height: "0.7rem",
                         borderRadius: "50%",
-                        background: entry.category === "Other" ? "#647687" : PIE_COLORS[index % PIE_COLORS.length],
+                        background:
+                          entry.category === "Other"
+                            ? `linear-gradient(135deg, ${PIE_OTHER_GRADIENT[0]}, ${PIE_OTHER_GRADIENT[1]})`
+                            : `linear-gradient(135deg, ${PIE_GRADIENTS[index % PIE_GRADIENTS.length][0]}, ${PIE_GRADIENTS[index % PIE_GRADIENTS.length][1]})`,
                         marginRight: "0.5rem",
                       }}
                     />

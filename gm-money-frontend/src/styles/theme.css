@@ -1,24 +1,61 @@
 :root {
-  --gm-primary: #1f5a36;
-  --gm-header: #123d25;
-  --gm-accent: #2e7048;
+  --gm-moss-deep: #0f3d26;
+  --gm-moss-mid: #1f5a36;
+  --gm-moss-bright: #2e8b57;
+  --gm-moss-glow: #52b788;
+  --gm-gold: #d9a441;
+  --gm-gold-soft: #f0cd83;
+
+  --gm-primary: var(--gm-moss-mid);
+  --gm-header: var(--gm-moss-deep);
+  --gm-accent: var(--gm-moss-bright);
+  --gm-gradient-brand: linear-gradient(135deg, var(--gm-moss-deep) 0%, var(--gm-moss-mid) 55%, var(--gm-moss-bright) 100%);
+
   --gm-surface: #ffffff;
-  --gm-surface-muted: #f4f7f5;
-  --gm-border: #d9e2dc;
-  --gm-text: #1c2620;
-  --gm-text-muted: #5b6b61;
-  --gm-negative: #b3261e;
-  --gm-positive: #1f7a3d;
+  --gm-surface-muted: #f4f7f2;
+  --gm-surface-tonal: #eef3ea;
+  --gm-border: #dbe4dc;
+  --gm-border-strong: #c3d0c5;
+  --gm-text: #12201a;
+  --gm-text-muted: #57665c;
+  --gm-text-faint: #8a978d;
+
+  --gm-negative: #c8433a;
+  --gm-negative-bg: #fbebe9;
+  --gm-positive: #278a4c;
+  --gm-positive-bg: #e9f5ec;
+
   --gm-radius: 10px;
+  --gm-radius-card: 16px;
+  --gm-radius-tile: 18px;
+
+  --gm-shadow-sm: 0 1px 2px rgba(15, 61, 38, 0.05), 0 2px 6px rgba(15, 61, 38, 0.05);
+  --gm-shadow-card: 0 1px 2px rgba(15, 61, 38, 0.06), 0 14px 30px -14px rgba(15, 61, 38, 0.24);
+  --gm-shadow-tile: 0 10px 22px -8px rgba(15, 61, 38, 0.4);
+  --gm-shadow-focus: 0 0 0 3px rgba(46, 139, 87, 0.22);
+
+  --gm-font-display: Georgia, "Iowan Old Style", "Times New Roman", serif;
 }
 
 @media (prefers-color-scheme: dark) {
   :root {
-    --gm-surface: #16201a;
-    --gm-surface-muted: #1c2a21;
-    --gm-border: #2c3c32;
-    --gm-text: #eaf1ec;
-    --gm-text-muted: #a7b8ae;
+    --gm-surface: #16241b;
+    --gm-surface-muted: #0d1712;
+    --gm-surface-tonal: #1b2a20;
+    --gm-border: #2b3c31;
+    --gm-border-strong: #3a4d3f;
+    --gm-text: #eef4ef;
+    --gm-text-muted: #a6b6ac;
+    --gm-text-faint: #6f8177;
+
+    --gm-negative: #e8756c;
+    --gm-negative-bg: #3a1a17;
+    --gm-positive: #5cc98a;
+    --gm-positive-bg: #123422;
+
+    --gm-shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.25), 0 2px 6px rgba(0, 0, 0, 0.2);
+    --gm-shadow-card: 0 1px 2px rgba(0, 0, 0, 0.3), 0 18px 34px -16px rgba(0, 0, 0, 0.6);
+    --gm-shadow-tile: 0 12px 24px -8px rgba(0, 0, 0, 0.55);
   }
 }
 
@@ -31,6 +68,7 @@ body {
   background: var(--gm-surface-muted);
   color: var(--gm-text);
   font-family: "Segoe UI", system-ui, -apple-system, sans-serif;
+  font-variant-numeric: tabular-nums;
 }
 
 .gm-app {
@@ -40,11 +78,14 @@ body {
 }
 
 .gm-header-bar {
-  background: var(--gm-header);
-  color: #fff;
-  padding: 1rem 1.25rem;
-  font-size: 1.1rem;
-  font-weight: 600;
+  background: var(--gm-gradient-brand);
+  color: #f4f7f2;
+  padding: 1.1rem 1.25rem;
+  font-family: var(--gm-font-display);
+  font-size: 1.15rem;
+  letter-spacing: 0.01em;
+  box-shadow: 0 4px 16px -6px rgba(15, 61, 38, 0.5);
+  position: relative;
 }
 
 .gm-main {
@@ -59,7 +100,8 @@ body {
   max-width: 480px;
   background: var(--gm-surface);
   border: 1px solid var(--gm-border);
-  border-radius: var(--gm-radius);
+  border-radius: var(--gm-radius-card);
+  box-shadow: var(--gm-shadow-card);
   padding: 1.5rem;
 }
 
@@ -81,10 +123,19 @@ body {
 .gm-field textarea {
   padding: 0.65rem 0.75rem;
   border: 1px solid var(--gm-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--gm-surface);
   color: var(--gm-text);
   font-size: 1rem;
+  transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+
+.gm-field input:focus,
+.gm-field select:focus,
+.gm-field textarea:focus {
+  outline: none;
+  border-color: var(--gm-moss-bright);
+  box-shadow: var(--gm-shadow-focus);
 }
 
 .gm-field textarea {
@@ -95,53 +146,65 @@ body {
 .gm-button {
   width: 100%;
   padding: 0.75rem 1rem;
-  background: var(--gm-primary);
+  background: linear-gradient(135deg, var(--gm-moss-mid), var(--gm-moss-bright));
   color: #fff;
   border: none;
-  border-radius: 8px;
+  border-radius: 10px;
   font-size: 1rem;
   font-weight: 600;
   cursor: pointer;
+  box-shadow: 0 6px 16px -6px rgba(15, 61, 38, 0.55);
+  transition: transform 0.12s ease, box-shadow 0.12s ease, filter 0.12s ease;
 }
 
 .gm-button:disabled {
   opacity: 0.6;
   cursor: not-allowed;
+  box-shadow: none;
 }
 
 .gm-button:not(:disabled):hover {
-  background: var(--gm-accent);
+  filter: brightness(1.06);
+  box-shadow: 0 8px 20px -6px rgba(15, 61, 38, 0.65);
+}
+
+.gm-button:not(:disabled):active {
+  transform: translateY(1px) scale(0.99);
 }
 
 .gm-preview {
   margin: 0.75rem 0;
   font-weight: 600;
   text-align: center;
+  padding: 0.5rem 0.75rem;
+  border-radius: 999px;
 }
 
 .gm-preview--income {
   color: var(--gm-positive);
+  background: var(--gm-positive-bg);
 }
 
 .gm-preview--expense {
   color: var(--gm-negative);
+  background: var(--gm-negative-bg);
 }
 
 .gm-error {
-  background: #fbe9e7;
+  background: var(--gm-negative-bg);
   color: var(--gm-negative);
   border: 1px solid var(--gm-negative);
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 0.65rem 0.85rem;
   margin-bottom: 1rem;
   font-size: 0.9rem;
 }
 
 .gm-success {
-  background: #e6f4ea;
+  background: var(--gm-positive-bg);
   color: var(--gm-positive);
   border: 1px solid var(--gm-positive);
-  border-radius: 8px;
+  border-radius: 10px;
   padding: 0.65rem 0.85rem;
   margin-bottom: 1rem;
   font-size: 0.9rem;
@@ -157,41 +220,51 @@ body {
   flex: 1;
   padding: 0.6rem;
   border: 1px solid var(--gm-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--gm-surface);
   color: var(--gm-text);
   cursor: pointer;
   font-size: 0.95rem;
+  transition: background 0.15s ease, box-shadow 0.15s ease;
 }
 
 .gm-who-picker button.gm-who-picker__selected {
-  background: var(--gm-primary);
-  border-color: var(--gm-primary);
+  background: linear-gradient(135deg, var(--gm-moss-mid), var(--gm-moss-bright));
+  border-color: transparent;
   color: #fff;
   font-weight: 600;
+  box-shadow: 0 6px 14px -6px rgba(15, 61, 38, 0.55);
 }
 
 .gm-nav-tabs {
   display: flex;
-  gap: 0.25rem;
-  background: var(--gm-header);
-  padding: 0 1.25rem;
+  gap: 0.2rem;
+  background: var(--gm-moss-deep);
+  padding: 0.4rem 0.75rem;
+  overflow-x: auto;
 }
 
 .gm-nav-tab {
-  padding: 0.6rem 1rem;
+  padding: 0.5rem 0.9rem;
   border: none;
   background: transparent;
-  color: rgba(255, 255, 255, 0.7);
-  font-size: 0.95rem;
+  color: rgba(244, 247, 242, 0.68);
+  font-size: 0.92rem;
   font-weight: 600;
   cursor: pointer;
-  border-bottom: 3px solid transparent;
+  border-radius: 999px;
+  white-space: nowrap;
+  transition: background 0.15s ease, color 0.15s ease;
+}
+
+.gm-nav-tab:hover {
+  color: rgba(244, 247, 242, 0.9);
 }
 
 .gm-nav-tab--active {
-  color: #fff;
-  border-bottom-color: var(--gm-accent);
+  color: #12201a;
+  background: linear-gradient(135deg, var(--gm-gold-soft), var(--gm-gold));
+  box-shadow: 0 4px 10px -3px rgba(217, 164, 65, 0.6);
 }
 
 .gm-card--wide {
@@ -214,6 +287,7 @@ body {
 .gm-register-summary__value {
   font-size: 1.15rem;
   font-weight: 700;
+  font-family: var(--gm-font-display);
 }
 
 .gm-register-note {
@@ -232,9 +306,15 @@ body {
   display: flex;
   flex-direction: column;
   gap: 0.5rem;
-  padding: 0.65rem 0.75rem;
-  border: 1px solid var(--gm-border);
-  border-radius: 8px;
+  padding: 0.7rem 0.85rem;
+  background: var(--gm-surface-tonal);
+  border: 1px solid transparent;
+  border-radius: 14px;
+  transition: border-color 0.15s ease;
+}
+
+.gm-register-row:hover {
+  border-color: var(--gm-border-strong);
 }
 
 .gm-register-row__top {
@@ -259,7 +339,7 @@ body {
 .gm-register-row__actions select {
   padding: 0.4rem 0.5rem;
   border: 1px solid var(--gm-border);
-  border-radius: 6px;
+  border-radius: 8px;
   background: var(--gm-surface);
   color: var(--gm-text);
   font-size: 0.85rem;
@@ -268,7 +348,7 @@ body {
 .gm-link-button {
   background: none;
   border: none;
-  color: var(--gm-primary);
+  color: var(--gm-moss-mid);
   font-size: 0.85rem;
   font-weight: 600;
   cursor: pointer;
@@ -300,11 +380,14 @@ body {
 .gm-button--secondary {
   background: var(--gm-surface);
   color: var(--gm-text);
-  border: 1px solid var(--gm-border);
+  border: 1px solid var(--gm-border-strong);
+  box-shadow: none;
 }
 
 .gm-button--secondary:not(:disabled):hover {
-  background: var(--gm-surface-muted);
+  background: var(--gm-surface-tonal);
+  box-shadow: none;
+  filter: none;
 }
 
 .gm-register-row__main {
@@ -351,46 +434,47 @@ body {
   flex-shrink: 0;
   font-size: 0.72rem;
   font-weight: 600;
-  padding: 0.2rem 0.5rem;
+  padding: 0.22rem 0.55rem;
   border-radius: 999px;
   white-space: nowrap;
 }
 
 .gm-status-badge--uncleared {
-  background: #fff4cc;
+  background: #fdf0cc;
   color: #8a6300;
 }
 
 .gm-status-badge--cleared {
-  background: #e8f5e9;
-  color: #1b5e20;
+  background: var(--gm-positive-bg);
+  color: var(--gm-positive);
 }
 
 .gm-status-badge--reconciled {
-  background: #e3f2fd;
-  color: #0d47a1;
+  background: #dcedfb;
+  color: #0d5ba1;
 }
 
 .gm-status-badge--auto-ready {
-  background: #e8f5e9;
-  color: #1b5e20;
+  background: var(--gm-positive-bg);
+  color: var(--gm-positive);
 }
 
 .gm-status-badge--learning {
-  background: #fff4cc;
+  background: #fdf0cc;
   color: #8a6300;
 }
 
 .gm-status-badge--locked {
-  background: #e3f2fd;
-  color: #0d47a1;
+  background: #dcedfb;
+  color: #0d5ba1;
 }
 
 /* ============================================================
-   Dashboard — the one screen that uses the Windows Phone
-   "live tile" look. Scoped entirely under .gm-dashboard so this
-   never leaks onto Entry/Register/Review, which stay in the calm
-   sage/card language above.
+   Dashboard — the app's showcase screen: a gradient hero for the
+   headline cash figures, then gradient "live tile" summary cards.
+   The gradient/elevation language established here (tokens above)
+   now carries through every other screen too, per the owner's
+   explicit direction — this section is just where it's boldest.
 ============================================================ */
 
 .gm-dashboard {
@@ -401,62 +485,111 @@ body {
   gap: 1rem;
 }
 
+.gm-dashboard-hero {
+  position: relative;
+  background: var(--gm-gradient-brand);
+  border-radius: var(--gm-radius-tile);
+  padding: 1.4rem 1.4rem 1.6rem;
+  color: #f4f7f2;
+  overflow: hidden;
+  box-shadow: var(--gm-shadow-tile);
+}
+
+.gm-dashboard-hero::after {
+  content: "";
+  position: absolute;
+  inset: -35% -15% auto auto;
+  width: 220px;
+  height: 220px;
+  background: radial-gradient(circle, rgba(217, 164, 65, 0.32), transparent 70%);
+  pointer-events: none;
+}
+
+.gm-dashboard-hero__row {
+  display: flex;
+  justify-content: space-between;
+  gap: 1.5rem;
+  position: relative;
+}
+
+.gm-dashboard-hero__label {
+  font-size: 0.75rem;
+  text-transform: uppercase;
+  letter-spacing: 0.08em;
+  color: rgba(244, 247, 242, 0.72);
+}
+
+.gm-dashboard-hero__value {
+  font-family: var(--gm-font-display);
+  font-size: 1.9rem;
+  margin-top: 0.15rem;
+}
+
+.gm-dashboard-hero__value--secondary {
+  font-size: 1.4rem;
+}
+
 .gm-metro-grid {
   display: grid;
   grid-template-columns: repeat(2, 1fr);
-  gap: 3px;
-  background: #c9d2c6;
-  padding: 3px;
-  border-radius: var(--gm-radius);
-  overflow: hidden;
+  gap: 0.7rem;
 }
 
 .gm-metro-tile {
-  padding: 1rem;
-  color: #ffffff;
+  position: relative;
+  padding: 1rem 1.05rem;
+  color: #f6f9f4;
   min-height: 5.5rem;
   display: flex;
   flex-direction: column;
   justify-content: flex-end;
+  border-radius: var(--gm-radius-tile);
+  box-shadow: var(--gm-shadow-tile);
+  overflow: hidden;
+}
+
+.gm-metro-tile::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(155deg, rgba(255, 255, 255, 0.18), rgba(255, 255, 255, 0) 55%);
 }
 
 .gm-metro-tile__label {
   font-size: 0.78rem;
   font-weight: 600;
   opacity: 0.9;
+  position: relative;
 }
 
 .gm-metro-tile__value {
   font-size: 1.4rem;
   font-weight: 700;
-}
-
-.gm-metro-tile--cash {
-  background: #008a00;
-}
-
-.gm-metro-tile--projected {
-  background: #0050ef;
+  position: relative;
 }
 
 .gm-metro-tile--income {
-  background: #00aba9;
+  background: linear-gradient(150deg, #1c7a4a, #52b788);
 }
 
 .gm-metro-tile--expenses {
-  background: #fa6800;
+  background: linear-gradient(150deg, #a8391f, #e0703f);
 }
 
 .gm-metro-tile--review {
-  background: #d80073;
+  background: linear-gradient(150deg, #7a2456, #c34b8e);
 }
 
 .gm-metro-tile--uncleared {
-  background: #6a00ff;
+  background: linear-gradient(150deg, #3d3480, #7c5cd9);
 }
 
 .gm-dashboard-panel {
   max-width: none;
+}
+
+.gm-dashboard-panel h3 {
+  font-family: var(--gm-font-display);
 }
 
 .gm-dashboard-balance-row {
@@ -488,7 +621,7 @@ body {
   min-width: 10rem;
   padding: 0.55rem 0.7rem;
   border: 1px solid var(--gm-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--gm-surface);
   color: var(--gm-text);
   font-size: 0.95rem;
@@ -497,7 +630,7 @@ body {
 .gm-settings-add-row select {
   padding: 0.55rem 0.5rem;
   border: 1px solid var(--gm-border);
-  border-radius: 8px;
+  border-radius: 10px;
   background: var(--gm-surface);
   color: var(--gm-text);
 }
@@ -519,8 +652,9 @@ body {
 }
 
 .gm-settings-category {
-  border: 1px solid var(--gm-border);
-  border-radius: 8px;
+  background: var(--gm-surface-tonal);
+  border: 1px solid transparent;
+  border-radius: 14px;
   padding: 0.75rem;
   margin-bottom: 0.75rem;
 }
