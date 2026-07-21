@@ -177,6 +177,9 @@ function handleApiRequest_(e) {
       case "setNotificationEmails":
         return jsonOutput_(apiSetNotificationEmails_(payload));
 
+      case "setNotificationPrefs":
+        return jsonOutput_(apiSetNotificationPrefs_(payload));
+
       case "sendTestNotification":
         return jsonOutput_(apiSendTestNotification_());
 
@@ -2345,9 +2348,60 @@ function getNotificationEmailList_() {
 }
 
 
+const GM_NOTIFICATION_PREFS_PROPERTY = "GM_NOTIFICATION_PREFS";
+
+const GM_NOTIFICATION_PREFS_DEFAULTS_ = {
+  upcomingBills: true,
+  overBudget: true,
+  lowBalance: false,
+  lowBalanceThreshold: 100,
+  newDeposits: false,
+  newDepositThreshold: 0
+};
+
+function getNotificationPrefs_() {
+  const raw = PropertiesService.getScriptProperties().getProperty(GM_NOTIFICATION_PREFS_PROPERTY);
+
+  if (!raw) {
+    return Object.assign({}, GM_NOTIFICATION_PREFS_DEFAULTS_);
+  }
+
+  try {
+    return Object.assign({}, GM_NOTIFICATION_PREFS_DEFAULTS_, JSON.parse(raw));
+  } catch (err) {
+    return Object.assign({}, GM_NOTIFICATION_PREFS_DEFAULTS_);
+  }
+}
+
+
+function apiSetNotificationPrefs_(payload) {
+  const prefs = {
+    upcomingBills: payload.upcomingBills !== false,
+    overBudget: payload.overBudget !== false,
+    lowBalance: payload.lowBalance === true,
+    lowBalanceThreshold: isFinite(Number(payload.lowBalanceThreshold)) ? Number(payload.lowBalanceThreshold) : 100,
+    newDeposits: payload.newDeposits === true,
+    newDepositThreshold: isFinite(Number(payload.newDepositThreshold)) ? Number(payload.newDepositThreshold) : 0
+  };
+
+  const lock = LockService.getScriptLock();
+
+  if (!lock.tryLock(10000)) {
+    return { ok: false, code: "LOCK_TIMEOUT", error: "The system is busy — try again in a moment." };
+  }
+
+  try {
+    PropertiesService.getScriptProperties().setProperty(GM_NOTIFICATION_PREFS_PROPERTY, JSON.stringify(prefs));
+    return { ok: true, data: { prefs: prefs } };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
 function apiGetNotificationSettings_() {
   const emails = getNotificationEmailList_();
-  return { emails: emails, enabled: emails.length > 0 };
+  return { emails: emails, enabled: emails.length > 0, prefs: getNotificationPrefs_() };
 }
 
 
@@ -2384,43 +2438,100 @@ function apiSetNotificationEmails_(payload) {
 
 
 function buildNotificationDigestLines_() {
-  const today = new Date();
-  today.setHours(0, 0, 0, 0);
-
-  const horizon = new Date(today);
-  horizon.setDate(horizon.getDate() + GM_NOTIFICATION_LOOKAHEAD_DAYS);
-
-  const upcomingBills = apiGetScheduledTransactions_().filter(function(item) {
-    if (!item.active) return false;
-    const due = parseDateOnly_(item.nextDue);
-    return due && due >= today && due <= horizon;
-  });
-
-  // Bypasses the getDashboard cache deliberately -- this runs once a
-  // day via trigger, not per web request, so the ~15s full recompute
-  // cost is a non-issue here, and a notification email should always
-  // reflect genuinely current numbers.
-  const overBudget = buildDashboardData_().budgetProgress.filter(function(b) {
-    return b.spent > b.budgeted;
-  });
-
+  const prefs = getNotificationPrefs_();
   const lines = [];
 
-  if (upcomingBills.length > 0) {
-    lines.push("Upcoming bills (next " + GM_NOTIFICATION_LOOKAHEAD_DAYS + " days):");
-    upcomingBills.forEach(function(b) {
-      lines.push("- " + b.payee + ": $" + Math.abs(b.amount).toFixed(2) + " due " + b.nextDue);
+  if (prefs.upcomingBills) {
+    const today = new Date();
+    today.setHours(0, 0, 0, 0);
+
+    const horizon = new Date(today);
+    horizon.setDate(horizon.getDate() + GM_NOTIFICATION_LOOKAHEAD_DAYS);
+
+    const upcomingBills = apiGetScheduledTransactions_().filter(function(item) {
+      if (!item.active) return false;
+      const due = parseDateOnly_(item.nextDue);
+      return due && due >= today && due <= horizon;
     });
+
+    if (upcomingBills.length > 0) {
+      lines.push("Upcoming bills (next " + GM_NOTIFICATION_LOOKAHEAD_DAYS + " days):");
+      upcomingBills.forEach(function(b) {
+        lines.push("- " + b.payee + ": $" + Math.abs(b.amount).toFixed(2) + " due " + b.nextDue);
+      });
+    }
   }
 
-  if (overBudget.length > 0) {
-    if (lines.length > 0) lines.push("");
-    lines.push("Over budget this month:");
-    overBudget.forEach(function(b) {
-      lines.push(
-        "- " + b.category + ": $" + b.spent.toFixed(2) + " spent of $" + b.budgeted.toFixed(2) + " budgeted"
-      );
+  if (prefs.overBudget) {
+    // Bypasses the getDashboard cache deliberately -- this runs once a
+    // day via trigger, not per web request, so the ~15s full recompute
+    // cost is a non-issue here, and a notification email should always
+    // reflect genuinely current numbers.
+    const overBudget = buildDashboardData_().budgetProgress.filter(function(b) {
+      return b.spent > b.budgeted;
     });
+
+    if (overBudget.length > 0) {
+      if (lines.length > 0) lines.push("");
+      lines.push("Over budget this month:");
+      overBudget.forEach(function(b) {
+        lines.push(
+          "- " + b.category + ": $" + b.spent.toFixed(2) + " spent of $" + b.budgeted.toFixed(2) + " budgeted"
+        );
+      });
+    }
+  }
+
+  if (prefs.lowBalance) {
+    const lowAccounts = getLatestAccountBalances_().filter(function(b) {
+      return b.balance < prefs.lowBalanceThreshold;
+    });
+
+    if (lowAccounts.length > 0) {
+      if (lines.length > 0) lines.push("");
+      lines.push("Low balance (below $" + prefs.lowBalanceThreshold.toFixed(2) + "):");
+      lowAccounts.forEach(function(b) {
+        lines.push("- " + b.account + ": $" + b.balance.toFixed(2));
+      });
+    }
+  }
+
+  if (prefs.newDeposits) {
+    // "Yesterday" -- the digest runs at 7am, before that day's own
+    // transactions would typically exist yet, so the prior full day is
+    // the window that actually contains unreported activity.
+    const yesterdayStart = new Date();
+    yesterdayStart.setDate(yesterdayStart.getDate() - 1);
+    yesterdayStart.setHours(0, 0, 0, 0);
+
+    const yesterdayEnd = new Date(yesterdayStart);
+    yesterdayEnd.setHours(23, 59, 59, 999);
+
+    const manual = getManualTransactionsSheet_();
+    const source = getTillerTransactionsSheet_();
+    const entries = buildRegisterEntries_(manual, source, "");
+
+    const deposits = entries.filter(function(entry) {
+      const date = entry.date instanceof Date ? entry.date : new Date(entry.date);
+
+      if (isNaN(date.getTime()) || date < yesterdayStart || date > yesterdayEnd) {
+        return false;
+      }
+
+      if (getConfiguredCategoryType_(entry.category) !== "Income") {
+        return false;
+      }
+
+      return Math.abs(entry.amount) >= prefs.newDepositThreshold;
+    });
+
+    if (deposits.length > 0) {
+      if (lines.length > 0) lines.push("");
+      lines.push("New deposits yesterday:");
+      deposits.forEach(function(d) {
+        lines.push("- " + d.payee + ": $" + Math.abs(d.amount).toFixed(2));
+      });
+    }
   }
 
   return lines;

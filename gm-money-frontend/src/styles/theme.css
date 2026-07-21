@@ -850,3 +850,31 @@ body {
     grid-template-columns: repeat(4, 1fr);
   }
 }
+
+/* ============================================================
+   Notification preference toggles (Settings)
+============================================================ */
+
+.gm-notification-pref {
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+  font-size: 0.9rem;
+  padding: 0.4rem 0;
+}
+
+.gm-notification-pref input[type="checkbox"] {
+  width: 1rem;
+  height: 1rem;
+  flex-shrink: 0;
+}
+
+.gm-notification-pref__amount {
+  width: 5rem;
+  padding: 0.3rem 0.5rem;
+  border: 1px solid var(--gm-border);
+  border-radius: 8px;
+  background: var(--gm-surface);
+  color: var(--gm-text);
+  font-size: 0.85rem;
+}

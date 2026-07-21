@@ -5,8 +5,18 @@ import type {
   AddSubcategoryResult,
   BudgetRecord,
   FormOptions,
+  NotificationPrefs,
   NotificationSettings,
 } from "../../api/types";
+
+const DEFAULT_NOTIFICATION_PREFS: NotificationPrefs = {
+  upcomingBills: true,
+  overBudget: true,
+  lowBalance: false,
+  lowBalanceThreshold: 100,
+  newDeposits: false,
+  newDepositThreshold: 0,
+};
 
 type Props = {
   onAuthFailure: () => void;
@@ -30,6 +40,8 @@ export function SettingsView({ onAuthFailure }: Props) {
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
   const [newNotificationEmail, setNewNotificationEmail] = useState("");
   const [testMessage, setTestMessage] = useState("");
+  const [prefsDraft, setPrefsDraft] = useState<NotificationPrefs>(DEFAULT_NOTIFICATION_PREFS);
+  const [prefsSaved, setPrefsSaved] = useState(true);
 
   async function load() {
     setStatus("loading");
@@ -61,6 +73,8 @@ export function SettingsView({ onAuthFailure }: Props) {
     if (notificationsResult.ok) {
       setNotificationEmails(notificationsResult.data.emails);
       setNotificationsEnabled(notificationsResult.data.enabled);
+      setPrefsDraft(notificationsResult.data.prefs);
+      setPrefsSaved(true);
     }
 
     setStatus("ready");
@@ -156,6 +170,16 @@ export function SettingsView({ onAuthFailure }: Props) {
     );
   }
 
+  function updatePrefsDraft(patch: Partial<NotificationPrefs>) {
+    setPrefsDraft((prev) => ({ ...prev, ...patch }));
+    setPrefsSaved(false);
+  }
+
+  async function handleSavePrefs() {
+    setTestMessage("");
+    await withBusy(() => callApi("setNotificationPrefs", prefsDraft));
+  }
+
   async function handleSendTestNotification() {
     setBusy(true);
     setError("");
@@ -241,8 +265,78 @@ export function SettingsView({ onAuthFailure }: Props) {
         </button>
       </div>
 
+      <h4>Notify me about</h4>
+
+      <label className="gm-notification-pref">
+        <input
+          type="checkbox"
+          checked={prefsDraft.upcomingBills}
+          disabled={busy}
+          onChange={(e) => updatePrefsDraft({ upcomingBills: e.target.checked })}
+        />
+        Upcoming bills (next 3 days)
+      </label>
+
+      <label className="gm-notification-pref">
+        <input
+          type="checkbox"
+          checked={prefsDraft.overBudget}
+          disabled={busy}
+          onChange={(e) => updatePrefsDraft({ overBudget: e.target.checked })}
+        />
+        Categories over budget
+      </label>
+
+      <label className="gm-notification-pref">
+        <input
+          type="checkbox"
+          checked={prefsDraft.lowBalance}
+          disabled={busy}
+          onChange={(e) => updatePrefsDraft({ lowBalance: e.target.checked })}
+        />
+        Low account balance, below
+        <input
+          type="number"
+          step="1"
+          min="0"
+          value={prefsDraft.lowBalanceThreshold}
+          disabled={busy || !prefsDraft.lowBalance}
+          onChange={(e) => updatePrefsDraft({ lowBalanceThreshold: Number(e.target.value) })}
+          className="gm-notification-pref__amount"
+        />
+      </label>
+
+      <label className="gm-notification-pref">
+        <input
+          type="checkbox"
+          checked={prefsDraft.newDeposits}
+          disabled={busy}
+          onChange={(e) => updatePrefsDraft({ newDeposits: e.target.checked })}
+        />
+        New deposits, at least
+        <input
+          type="number"
+          step="1"
+          min="0"
+          value={prefsDraft.newDepositThreshold}
+          disabled={busy || !prefsDraft.newDeposits}
+          onChange={(e) => updatePrefsDraft({ newDepositThreshold: Number(e.target.value) })}
+          className="gm-notification-pref__amount"
+        />
+      </label>
+
+      <button
+        type="button"
+        className="gm-link-button"
+        disabled={busy || prefsSaved}
+        onClick={handleSavePrefs}
+        style={{ marginTop: "0.5rem" }}
+      >
+        Save Preferences
+      </button>
+
       {notificationsEnabled && (
-        <div className="gm-settings-add-row">
+        <div className="gm-settings-add-row" style={{ marginTop: "0.75rem" }}>
           <span style={{ flex: 1 }}>
             Notifications are on for {notificationEmails.length}{" "}
             {notificationEmails.length === 1 ? "person" : "people"}.

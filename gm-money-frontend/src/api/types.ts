@@ -150,9 +150,19 @@ export type DashboardData = {
   budgetProgress: DashboardBudgetProgress[];
 };
 
+export type NotificationPrefs = {
+  upcomingBills: boolean;
+  overBudget: boolean;
+  lowBalance: boolean;
+  lowBalanceThreshold: number;
+  newDeposits: boolean;
+  newDepositThreshold: number;
+};
+
 export type NotificationSettings = {
   emails: string[];
   enabled: boolean;
+  prefs: NotificationPrefs;
 };
 
 export type BudgetRecord = {
