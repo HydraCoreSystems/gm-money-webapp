@@ -430,6 +430,8 @@ function apiCreateTransaction_(payload) {
     // The Sheet's own Register/Dashboard tabs catch up next time they're
     // opened, same as any other out-of-band edit to the data sheets.
 
+    invalidateDashboardCache_();
+
     return {
       ok: true,
       data: {
@@ -621,6 +623,8 @@ function apiUpdateTransaction_(payload) {
 
     dataSheet.getRange(rowNumber, 1, 1, output.length).setValues([output]);
 
+    invalidateDashboardCache_();
+
     return {
       ok: true,
       data: {
@@ -662,6 +666,8 @@ function apiDeleteTransaction_(payload) {
 
     dataSheet.deleteRow(rowNumber);
 
+    invalidateDashboardCache_();
+
     return { ok: true, data: { transactionId: transactionId } };
   } finally {
     lock.releaseLock();
@@ -702,6 +708,8 @@ function apiUpdateTransactionStatus_(payload) {
     }
 
     dataSheet.getRange(rowNumber, 11).setValue(status); // column 11 = Status
+
+    invalidateDashboardCache_();
 
     return { ok: true, data: { transactionId: transactionId, status: status } };
   } finally {
@@ -766,6 +774,8 @@ function apiMatchTransaction_(payload) {
     } catch (learnError) {
       console.error("Merchant learning failed during match: " + learnError.message);
     }
+
+    invalidateDashboardCache_();
 
     return { ok: true, data: { transactionId: transactionId, bankKey: bankKey } };
   } finally {
@@ -915,6 +925,8 @@ function apiApproveTransaction_(payload) {
       };
     }
 
+    invalidateDashboardCache_();
+
     return { ok: true, data: { sourceRow: sourceRow, transactionKey: transactionKey } };
   } finally {
     lock.releaseLock();
@@ -943,7 +955,46 @@ function apiApproveTransaction_(payload) {
  * getConfiguredCategoryType_, the same function apiCreateTransaction_
  * already uses correctly.
  */
+/* ============================================================
+   Dashboard cache
+
+   getDashboard's underlying computation merges the FULL manual +
+   Tiller transaction history (thousands of rows, ~2 years of real
+   data) every time it runs -- confirmed the original Sheets Dashboard
+   (getManualDashboardSummary_, Dashboard.gs) does the exact same full
+   merge, but only ever runs it on-demand via a menu click, then shows
+   already-computed cell values on every subsequent view. This API
+   recomputes from scratch on every single request with no equivalent
+   cache, which is the real reason it feels slower than Sheets did --
+   not a difference in how much data gets scanned. A short-TTL cache
+   here reproduces that same "compute once, view many times" feel.
+   Invalidated proactively by every mutation that could change the
+   numbers, so it can never show stale data after a real change --
+   the TTL only matters for repeat views with nothing changed.
+============================================================ */
+
+const DASHBOARD_CACHE_KEY = "gm_dashboard_v1";
+const DASHBOARD_CACHE_TTL_SECONDS = 300;
+
+function invalidateDashboardCache_() {
+  CacheService.getScriptCache().remove(DASHBOARD_CACHE_KEY);
+}
+
 function apiGetDashboard_() {
+  const cache = CacheService.getScriptCache();
+  const cached = cache.get(DASHBOARD_CACHE_KEY);
+
+  if (cached) {
+    return JSON.parse(cached);
+  }
+
+  const result = buildDashboardData_();
+  cache.put(DASHBOARD_CACHE_KEY, JSON.stringify(result), DASHBOARD_CACHE_TTL_SECONDS);
+  return result;
+}
+
+
+function buildDashboardData_() {
   const balances = getLatestAccountBalances_();
   const currentCash = balances.reduce(function(sum, b) { return sum + b.balance; }, 0);
 
@@ -1004,16 +1055,45 @@ function apiGetDashboard_() {
 
   const pendingReviewCount = apiGetReviewTransactions_().length;
 
-  // Reuses the Entry screen's existing category-breakdown helper
-  // (Entry.gs) verbatim -- same current-month grouping, same
-  // category-type filter (Expense only, via getConfiguredCategoryType_,
-  // not raw amount sign), same "Category: Subcategory" chart labels,
-  // already sorted largest-first. Money's own home page (per the
-  // screenshot the user shared) puts this "Spending by category" pie
-  // chart on the home screen, not a separate Reports screen.
-  const spendingByCategory = getEntryMonthlySpendingByCategory_().rows
-    .map(function(row) {
-      return { category: row[0], amount: row[1] };
+  // Groups the SAME `entries` already computed above for the
+  // income/expense totals, rather than calling
+  // getEntryMonthlySpendingByCategory_() (which would redundantly
+  // re-fetch both sheets and re-run the full buildRegisterEntries_
+  // merge a second time in this same request). Same current-month
+  // grouping, same category-type filter (Expense only, via
+  // getConfiguredCategoryType_, not raw amount sign), same
+  // "Category: Subcategory" chart labels as that helper -- money's own
+  // home page (per the screenshot the user shared) puts this
+  // "Spending by category" pie chart on the home screen, not a
+  // separate Reports screen.
+  const categoryTotals = {};
+
+  entries.forEach(function(entry) {
+    const date = entry.date instanceof Date ? entry.date : new Date(entry.date);
+
+    if (isNaN(date.getTime()) || date.getMonth() !== month || date.getFullYear() !== year) {
+      return;
+    }
+
+    const category = String(entry.category || "Uncategorized").trim() || "Uncategorized";
+
+    if (getConfiguredCategoryType_(category) !== "Expense") {
+      return;
+    }
+
+    const label = buildEntryChartGroupLabel_(category, entry.subcategory);
+    categoryTotals[label] = (categoryTotals[label] || 0) + Math.abs(Number(entry.amount || 0));
+  });
+
+  const spendingByCategory = Object.keys(categoryTotals)
+    .map(function(category) {
+      return { category: category, amount: categoryTotals[category] };
+    })
+    .filter(function(row) {
+      return row.amount > 0.004;
+    })
+    .sort(function(a, b) {
+      return b.amount - a.amount;
     });
 
   return {
@@ -1739,6 +1819,7 @@ function apiProcessScheduledTransactionsNow_() {
 
   try {
     processDueScheduledTransactionsForSpreadsheet_(SpreadsheetApp.getActiveSpreadsheet());
+    invalidateDashboardCache_();
     return { ok: true, data: { processed: true } };
   } finally {
     lock.releaseLock();
