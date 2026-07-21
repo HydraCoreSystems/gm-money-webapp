@@ -1,6 +1,12 @@
 import { useEffect, useState } from "react";
 import { callApi } from "../../api/client";
-import type { AddCategoryResult, AddSubcategoryResult, BudgetRecord, FormOptions } from "../../api/types";
+import type {
+  AddCategoryResult,
+  AddSubcategoryResult,
+  BudgetRecord,
+  FormOptions,
+  NotificationSettings,
+} from "../../api/types";
 
 type Props = {
   onAuthFailure: () => void;
@@ -20,11 +26,17 @@ export function SettingsView({ onAuthFailure }: Props) {
   const [budgets, setBudgets] = useState<BudgetRecord[]>([]);
   const [budgetDrafts, setBudgetDrafts] = useState<Record<string, string>>({});
 
+  const [notificationEmail, setNotificationEmail] = useState("");
+  const [notificationsEnabled, setNotificationsEnabled] = useState(false);
+  const [notificationDraft, setNotificationDraft] = useState("");
+  const [testMessage, setTestMessage] = useState("");
+
   async function load() {
     setStatus("loading");
-    const [optionsResult, budgetsResult] = await Promise.all([
+    const [optionsResult, budgetsResult, notificationsResult] = await Promise.all([
       callApi<FormOptions>("getFormOptions"),
       callApi<BudgetRecord[]>("getBudgets"),
+      callApi<NotificationSettings>("getNotificationSettings"),
     ]);
 
     if (!optionsResult.ok) {
@@ -44,6 +56,12 @@ export function SettingsView({ onAuthFailure }: Props) {
       setBudgetDrafts(
         Object.fromEntries(budgetsResult.data.map((b) => [b.category, String(b.monthlyBudget)]))
       );
+    }
+
+    if (notificationsResult.ok) {
+      setNotificationEmail(notificationsResult.data.email);
+      setNotificationsEnabled(notificationsResult.data.enabled);
+      setNotificationDraft(notificationsResult.data.email);
     }
 
     setStatus("ready");
@@ -124,6 +142,37 @@ export function SettingsView({ onAuthFailure }: Props) {
     });
   }
 
+  async function handleSaveNotificationEmail() {
+    setTestMessage("");
+    await withBusy(() => callApi("setNotificationEmail", { email: notificationDraft.trim() }));
+  }
+
+  async function handleDisableNotifications() {
+    if (!window.confirm("Turn off email notifications?")) return;
+    setTestMessage("");
+    setNotificationDraft("");
+    await withBusy(() => callApi("setNotificationEmail", { email: "" }));
+  }
+
+  async function handleSendTestNotification() {
+    setBusy(true);
+    setError("");
+    setTestMessage("");
+    const result = await callApi("sendTestNotification");
+    setBusy(false);
+
+    if (!result.ok) {
+      if (result.code === "BAD_PASSWORD") {
+        onAuthFailure();
+        return;
+      }
+      setError(result.error);
+      return;
+    }
+
+    setTestMessage("Test email sent — check your inbox in a minute.");
+  }
+
   if (status === "loading") {
     return (
       <div className="gm-card gm-card--wide">
@@ -145,6 +194,46 @@ export function SettingsView({ onAuthFailure }: Props) {
       <h2 style={{ marginTop: 0 }}>Settings</h2>
 
       {error && <p className="gm-error">{error}</p>}
+
+      <h3>Notifications</h3>
+      <p className="gm-register-note">
+        Get a daily email when bills are due within {"3"} days or a category goes over budget. Nothing
+        is sent on days with nothing to report.
+      </p>
+
+      {testMessage && <p className="gm-success">{testMessage}</p>}
+
+      <div className="gm-settings-add-row">
+        <input
+          type="email"
+          placeholder="you@example.com"
+          value={notificationDraft}
+          onChange={(e) => setNotificationDraft(e.target.value)}
+          disabled={busy}
+        />
+        <button
+          type="button"
+          className="gm-link-button"
+          disabled={busy || !notificationDraft.trim() || notificationDraft.trim() === notificationEmail}
+          onClick={handleSaveNotificationEmail}
+        >
+          Save
+        </button>
+        {notificationsEnabled && (
+          <button type="button" className="gm-link-button" disabled={busy} onClick={handleDisableNotifications}>
+            Turn Off
+          </button>
+        )}
+      </div>
+
+      {notificationsEnabled && (
+        <div className="gm-settings-add-row">
+          <span style={{ flex: 1 }}>Notifications are on for {notificationEmail}.</span>
+          <button type="button" className="gm-link-button" disabled={busy} onClick={handleSendTestNotification}>
+            Send Test Email
+          </button>
+        </div>
+      )}
 
       <h3>Categories</h3>
 

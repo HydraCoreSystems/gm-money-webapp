@@ -48,7 +48,30 @@ function onOpen() {
     .addSeparator()
     .addItem("Hide Backend Sheets", "hideBackendSheets")
     .addItem("Show Backend Sheets", "showBackendSheets")
+    .addSeparator()
+    .addItem("Send Test Notification Email", "sendTestNotificationFromMenu")
     .addToUi();
+}
+
+
+/**
+ * Menu-triggered wrapper around apiSendTestNotification_ (Api.gs) --
+ * exists so the first-ever MailApp.sendEmail call in this project can
+ * be authorized through the Sheet's own custom menu (a reliable,
+ * well-trodden path for the Google authorization prompt), since the
+ * Apps Script web editor's own Run-function dropdown got stuck and
+ * wouldn't list the new function at all, even from a fresh Incognito
+ * session.
+ */
+function sendTestNotificationFromMenu() {
+  const ui = SpreadsheetApp.getUi();
+  const result = apiSendTestNotification_();
+
+  if (result.ok) {
+    ui.alert("Test notification sent. Check your inbox in a minute.");
+  } else {
+    ui.alert("Could not send test notification: " + result.error);
+  }
 }
 
 

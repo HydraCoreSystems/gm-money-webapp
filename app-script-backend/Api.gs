@@ -171,6 +171,15 @@ function handleApiRequest_(e) {
       case "deleteBudget":
         return jsonOutput_(apiDeleteBudget_(payload));
 
+      case "getNotificationSettings":
+        return jsonOutput_({ ok: true, data: apiGetNotificationSettings_() });
+
+      case "setNotificationEmail":
+        return jsonOutput_(apiSetNotificationEmail_(payload));
+
+      case "sendTestNotification":
+        return jsonOutput_(apiSendTestNotification_());
+
       default:
         return jsonError_(
           'Unknown action: "' + action + '".',
@@ -2271,4 +2280,169 @@ function apiDeleteBudget_(payload) {
   } finally {
     lock.releaseLock();
   }
+}
+
+
+/* ============================================================
+   Email notifications
+
+   Entirely new, additive. Free via MailApp -- no new infrastructure,
+   sends as the deploying user (matches the web app's own
+   "Execute as: Me" config, so it works from anonymous requests the
+   same way every other write already does). Push notifications were
+   explicitly deferred by the owner (real new infra, and don't work on
+   iPhone at all until installed as a PWA) -- email first.
+
+   Setting a notification email both stores it AND installs a daily
+   time-driven trigger (no manual Apps Script editor visit required);
+   clearing it removes the trigger too. A daily digest only sends when
+   there's actually something to report (upcoming bills in the next 3
+   days, or categories currently over budget) -- never an empty
+   "nothing to report" email every single day.
+============================================================ */
+
+const GM_NOTIFICATION_EMAIL_PROPERTY = "GM_NOTIFICATION_EMAIL";
+const GM_NOTIFICATION_TRIGGER_HANDLER = "sendDailyNotificationDigest_";
+const GM_NOTIFICATION_LOOKAHEAD_DAYS = 3;
+
+function installNotificationTrigger_() {
+  const alreadyInstalled = ScriptApp.getProjectTriggers().some(function(t) {
+    return t.getHandlerFunction() === GM_NOTIFICATION_TRIGGER_HANDLER;
+  });
+
+  if (alreadyInstalled) {
+    return;
+  }
+
+  ScriptApp.newTrigger(GM_NOTIFICATION_TRIGGER_HANDLER)
+    .timeBased()
+    .everyDays(1)
+    .atHour(7)
+    .create();
+}
+
+
+function removeNotificationTrigger_() {
+  ScriptApp.getProjectTriggers().forEach(function(t) {
+    if (t.getHandlerFunction() === GM_NOTIFICATION_TRIGGER_HANDLER) {
+      ScriptApp.deleteTrigger(t);
+    }
+  });
+}
+
+
+function apiGetNotificationSettings_() {
+  const email = PropertiesService.getScriptProperties().getProperty(GM_NOTIFICATION_EMAIL_PROPERTY) || "";
+  return { email: email, enabled: !!email };
+}
+
+
+function apiSetNotificationEmail_(payload) {
+  const email = String(payload.email || "").trim();
+
+  const lock = LockService.getScriptLock();
+
+  if (!lock.tryLock(10000)) {
+    return { ok: false, code: "LOCK_TIMEOUT", error: "The system is busy — try again in a moment." };
+  }
+
+  try {
+    if (!email) {
+      PropertiesService.getScriptProperties().deleteProperty(GM_NOTIFICATION_EMAIL_PROPERTY);
+      removeNotificationTrigger_();
+      return { ok: true, data: { email: "", enabled: false } };
+    }
+
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
+      return { ok: false, code: "VALIDATION_ERROR", error: "Enter a valid email address." };
+    }
+
+    PropertiesService.getScriptProperties().setProperty(GM_NOTIFICATION_EMAIL_PROPERTY, email);
+    installNotificationTrigger_();
+    return { ok: true, data: { email: email, enabled: true } };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+function buildNotificationDigestLines_() {
+  const today = new Date();
+  today.setHours(0, 0, 0, 0);
+
+  const horizon = new Date(today);
+  horizon.setDate(horizon.getDate() + GM_NOTIFICATION_LOOKAHEAD_DAYS);
+
+  const upcomingBills = apiGetScheduledTransactions_().filter(function(item) {
+    if (!item.active) return false;
+    const due = parseDateOnly_(item.nextDue);
+    return due && due >= today && due <= horizon;
+  });
+
+  // Bypasses the getDashboard cache deliberately -- this runs once a
+  // day via trigger, not per web request, so the ~15s full recompute
+  // cost is a non-issue here, and a notification email should always
+  // reflect genuinely current numbers.
+  const overBudget = buildDashboardData_().budgetProgress.filter(function(b) {
+    return b.spent > b.budgeted;
+  });
+
+  const lines = [];
+
+  if (upcomingBills.length > 0) {
+    lines.push("Upcoming bills (next " + GM_NOTIFICATION_LOOKAHEAD_DAYS + " days):");
+    upcomingBills.forEach(function(b) {
+      lines.push("- " + b.payee + ": $" + Math.abs(b.amount).toFixed(2) + " due " + b.nextDue);
+    });
+  }
+
+  if (overBudget.length > 0) {
+    if (lines.length > 0) lines.push("");
+    lines.push("Over budget this month:");
+    overBudget.forEach(function(b) {
+      lines.push(
+        "- " + b.category + ": $" + b.spent.toFixed(2) + " spent of $" + b.budgeted.toFixed(2) + " budgeted"
+      );
+    });
+  }
+
+  return lines;
+}
+
+
+function sendDailyNotificationDigest_() {
+  const email = PropertiesService.getScriptProperties().getProperty(GM_NOTIFICATION_EMAIL_PROPERTY);
+
+  if (!email) {
+    return;
+  }
+
+  const lines = buildNotificationDigestLines_();
+
+  if (lines.length === 0) {
+    return;
+  }
+
+  MailApp.sendEmail({
+    to: email,
+    subject: "GM Money — daily update",
+    body: lines.join("\n")
+  });
+}
+
+
+function apiSendTestNotification_() {
+  const email = PropertiesService.getScriptProperties().getProperty(GM_NOTIFICATION_EMAIL_PROPERTY);
+
+  if (!email) {
+    return { ok: false, code: "VALIDATION_ERROR", error: "Set a notification email first." };
+  }
+
+  MailApp.sendEmail({
+    to: email,
+    subject: "GM Money — test notification",
+    body: "This is a test notification from GM Money. If you're seeing this, email notifications are working correctly."
+  });
+
+  return { ok: true, data: { sent: true } };
 }

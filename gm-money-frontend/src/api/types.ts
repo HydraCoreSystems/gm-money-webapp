@@ -150,6 +150,11 @@ export type DashboardData = {
   budgetProgress: DashboardBudgetProgress[];
 };
 
+export type NotificationSettings = {
+  email: string;
+  enabled: boolean;
+};
+
 export type BudgetRecord = {
   category: string;
   monthlyBudget: number;
