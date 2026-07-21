@@ -9,6 +9,7 @@ import type {
   UpdateTransactionStatusResult,
 } from "../../api/types";
 import { EditTransactionForm } from "./EditTransactionForm";
+import { Avatar } from "../shared/Avatar";
 
 const STATUS_OPTIONS: RegisterStatus[] = ["Uncleared", "Cleared", "Reconciled"];
 
@@ -127,6 +128,7 @@ export function RegisterEntryRow({
   return (
     <div className="gm-register-row">
       <div className="gm-register-row__top">
+        <Avatar label={entry.payee} />
         <div className="gm-register-row__main">
           <div className="gm-register-row__payee">{entry.payee}</div>
           <div className="gm-register-row__meta">

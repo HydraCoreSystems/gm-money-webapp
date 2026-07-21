@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
 import { callApi } from "../../api/client";
 import type { DashboardData } from "../../api/types";
+import { Avatar } from "../shared/Avatar";
 
 function formatMoney(amount: number): string {
   const sign = amount < 0 ? "-" : "";
@@ -216,6 +217,7 @@ export function DashboardView({ onAuthFailure }: Props) {
           {data.recentTransactions.map((t, index) => (
             <div key={`${t.date}-${t.payee}-${index}`} className="gm-register-row">
               <div className="gm-register-row__top">
+                <Avatar label={t.payee} />
                 <div className="gm-register-row__main">
                   <div className="gm-register-row__payee">{t.payee}</div>
                   <div className="gm-register-row__meta">

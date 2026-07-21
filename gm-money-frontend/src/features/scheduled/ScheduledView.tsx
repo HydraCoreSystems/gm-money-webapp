@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from "react";
 import { callApi } from "../../api/client";
 import type { FormOptions, ScheduledTransaction } from "../../api/types";
 import { ScheduledTransactionForm } from "./ScheduledTransactionForm";
+import { BillCalendar } from "./BillCalendar";
+import { Avatar } from "../shared/Avatar";
 
 function formatMoney(amount: number): string {
   const sign = amount < 0 ? "-" : "";
@@ -94,6 +96,12 @@ export function ScheduledView({ formOptions, onAuthFailure }: Props) {
         Process Due Now
       </button>
 
+      {status === "ready" && (
+        <div style={{ marginTop: "1.25rem" }}>
+          <BillCalendar items={items} />
+        </div>
+      )}
+
       <div style={{ marginTop: "1.25rem" }}>
         <ScheduledTransactionForm formOptions={formOptions} onAuthFailure={onAuthFailure} onSaved={load} />
       </div>
@@ -123,6 +131,7 @@ export function ScheduledView({ formOptions, onAuthFailure }: Props) {
             ) : (
               <div key={item.scheduleId} className="gm-register-row">
                 <div className="gm-register-row__top">
+                  <Avatar label={item.payee} />
                   <div className="gm-register-row__main">
                     <div className="gm-register-row__payee">{item.payee}</div>
                     <div className="gm-register-row__meta">

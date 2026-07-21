@@ -2,6 +2,7 @@ import { useCallback, useEffect, useState } from "react";
 import { callApi } from "../../api/client";
 import type { FormOptions, MerchantMemoryData, MerchantMemoryStatus } from "../../api/types";
 import { EditMerchantMemoryForm } from "./EditMerchantMemoryForm";
+import { Avatar } from "../shared/Avatar";
 
 const FILTER_OPTIONS: ("All" | "Auto-Ready" | "Learning" | "Locked")[] = [
   "All",
@@ -179,6 +180,7 @@ export function MerchantMemoryView({ formOptions, onAuthFailure }: Props) {
                 ) : (
                   <div key={record.merchantKey} className="gm-register-row">
                     <div className="gm-register-row__top">
+                      <Avatar label={record.merchant} />
                       <div className="gm-register-row__main">
                         <div className="gm-register-row__payee">{record.merchant}</div>
                         <div className="gm-register-row__meta">

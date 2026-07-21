@@ -2,6 +2,7 @@ import { useState } from "react";
 import { callApi } from "../../api/client";
 import type { ApproveTransactionResult, FormOptions, ReviewTransaction } from "../../api/types";
 import { CategoryPicker } from "../transaction-entry/CategoryPicker";
+import { Avatar } from "../shared/Avatar";
 
 function formatMoney(amount: number): string {
   const sign = amount < 0 ? "-" : "";
@@ -51,6 +52,7 @@ export function ReviewEntryRow({ transaction, formOptions, onAuthFailure, onAppr
   return (
     <div className="gm-register-row">
       <div className="gm-register-row__top">
+        <Avatar label={transaction.description} />
         <div className="gm-register-row__main">
           <div className="gm-register-row__payee">{transaction.description}</div>
           <div className="gm-register-row__meta">
