@@ -26,9 +26,9 @@ export function SettingsView({ onAuthFailure }: Props) {
   const [budgets, setBudgets] = useState<BudgetRecord[]>([]);
   const [budgetDrafts, setBudgetDrafts] = useState<Record<string, string>>({});
 
-  const [notificationEmail, setNotificationEmail] = useState("");
+  const [notificationEmails, setNotificationEmails] = useState<string[]>([]);
   const [notificationsEnabled, setNotificationsEnabled] = useState(false);
-  const [notificationDraft, setNotificationDraft] = useState("");
+  const [newNotificationEmail, setNewNotificationEmail] = useState("");
   const [testMessage, setTestMessage] = useState("");
 
   async function load() {
@@ -59,9 +59,8 @@ export function SettingsView({ onAuthFailure }: Props) {
     }
 
     if (notificationsResult.ok) {
-      setNotificationEmail(notificationsResult.data.email);
+      setNotificationEmails(notificationsResult.data.emails);
       setNotificationsEnabled(notificationsResult.data.enabled);
-      setNotificationDraft(notificationsResult.data.email);
     }
 
     setStatus("ready");
@@ -142,16 +141,19 @@ export function SettingsView({ onAuthFailure }: Props) {
     });
   }
 
-  async function handleSaveNotificationEmail() {
+  async function handleAddNotificationEmail() {
+    const email = newNotificationEmail.trim();
+    if (!email || notificationEmails.includes(email)) return;
     setTestMessage("");
-    await withBusy(() => callApi("setNotificationEmail", { email: notificationDraft.trim() }));
+    await withBusy(() => callApi("setNotificationEmails", { emails: [...notificationEmails, email] }));
+    setNewNotificationEmail("");
   }
 
-  async function handleDisableNotifications() {
-    if (!window.confirm("Turn off email notifications?")) return;
+  async function handleRemoveNotificationEmail(email: string) {
     setTestMessage("");
-    setNotificationDraft("");
-    await withBusy(() => callApi("setNotificationEmail", { email: "" }));
+    await withBusy(() =>
+      callApi("setNotificationEmails", { emails: notificationEmails.filter((e) => e !== email) })
+    );
   }
 
   async function handleSendTestNotification() {
@@ -198,37 +200,53 @@ export function SettingsView({ onAuthFailure }: Props) {
       <h3>Notifications</h3>
       <p className="gm-register-note">
         Get a daily email when bills are due within {"3"} days or a category goes over budget. Nothing
-        is sent on days with nothing to report.
+        is sent on days with nothing to report. Add anyone who should be notified.
       </p>
 
       {testMessage && <p className="gm-success">{testMessage}</p>}
 
+      {notificationEmails.length > 0 && (
+        <ul className="gm-settings-subcategory-list">
+          {notificationEmails.map((email) => (
+            <li key={email}>
+              <span>{email}</span>
+              <button
+                type="button"
+                className="gm-link-button"
+                disabled={busy}
+                onClick={() => handleRemoveNotificationEmail(email)}
+              >
+                Remove
+              </button>
+            </li>
+          ))}
+        </ul>
+      )}
+
       <div className="gm-settings-add-row">
         <input
           type="email"
-          placeholder="you@example.com"
-          value={notificationDraft}
-          onChange={(e) => setNotificationDraft(e.target.value)}
+          placeholder="name@example.com"
+          value={newNotificationEmail}
+          onChange={(e) => setNewNotificationEmail(e.target.value)}
           disabled={busy}
         />
         <button
           type="button"
           className="gm-link-button"
-          disabled={busy || !notificationDraft.trim() || notificationDraft.trim() === notificationEmail}
-          onClick={handleSaveNotificationEmail}
+          disabled={busy || !newNotificationEmail.trim()}
+          onClick={handleAddNotificationEmail}
         >
-          Save
+          Add
         </button>
-        {notificationsEnabled && (
-          <button type="button" className="gm-link-button" disabled={busy} onClick={handleDisableNotifications}>
-            Turn Off
-          </button>
-        )}
       </div>
 
       {notificationsEnabled && (
         <div className="gm-settings-add-row">
-          <span style={{ flex: 1 }}>Notifications are on for {notificationEmail}.</span>
+          <span style={{ flex: 1 }}>
+            Notifications are on for {notificationEmails.length}{" "}
+            {notificationEmails.length === 1 ? "person" : "people"}.
+          </span>
           <button type="button" className="gm-link-button" disabled={busy} onClick={handleSendTestNotification}>
             Send Test Email
           </button>

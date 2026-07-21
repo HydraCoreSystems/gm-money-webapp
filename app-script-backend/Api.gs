@@ -174,8 +174,8 @@ function handleApiRequest_(e) {
       case "getNotificationSettings":
         return jsonOutput_({ ok: true, data: apiGetNotificationSettings_() });
 
-      case "setNotificationEmail":
-        return jsonOutput_(apiSetNotificationEmail_(payload));
+      case "setNotificationEmails":
+        return jsonOutput_(apiSetNotificationEmails_(payload));
 
       case "sendTestNotification":
         return jsonOutput_(apiSendTestNotification_());
@@ -2331,14 +2331,29 @@ function removeNotificationTrigger_() {
 }
 
 
-function apiGetNotificationSettings_() {
-  const email = PropertiesService.getScriptProperties().getProperty(GM_NOTIFICATION_EMAIL_PROPERTY) || "";
-  return { email: email, enabled: !!email };
+const GM_NOTIFICATION_EMAIL_VALID_ = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
+// Stored as a single comma-separated string in Script Properties
+// (MailApp.sendEmail's `to` field already natively accepts a
+// comma-separated list, so no new storage shape is needed) -- exposed
+// to the frontend as a proper array so it can render an add/remove
+// list, same UI pattern as Payment Methods, rather than asking the
+// user to type comma-separated addresses into one box.
+function getNotificationEmailList_() {
+  const raw = PropertiesService.getScriptProperties().getProperty(GM_NOTIFICATION_EMAIL_PROPERTY) || "";
+  return raw.split(",").map(function(e) { return e.trim(); }).filter(function(e) { return e; });
 }
 
 
-function apiSetNotificationEmail_(payload) {
-  const email = String(payload.email || "").trim();
+function apiGetNotificationSettings_() {
+  const emails = getNotificationEmailList_();
+  return { emails: emails, enabled: emails.length > 0 };
+}
+
+
+function apiSetNotificationEmails_(payload) {
+  const rawList = Array.isArray(payload.emails) ? payload.emails : [];
+  const emails = rawList.map(function(e) { return String(e || "").trim(); }).filter(function(e) { return e; });
 
   const lock = LockService.getScriptLock();
 
@@ -2347,19 +2362,21 @@ function apiSetNotificationEmail_(payload) {
   }
 
   try {
-    if (!email) {
+    if (emails.length === 0) {
       PropertiesService.getScriptProperties().deleteProperty(GM_NOTIFICATION_EMAIL_PROPERTY);
       removeNotificationTrigger_();
-      return { ok: true, data: { email: "", enabled: false } };
+      return { ok: true, data: { emails: [], enabled: false } };
     }
 
-    if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      return { ok: false, code: "VALIDATION_ERROR", error: "Enter a valid email address." };
+    for (let i = 0; i < emails.length; i++) {
+      if (!GM_NOTIFICATION_EMAIL_VALID_.test(emails[i])) {
+        return { ok: false, code: "VALIDATION_ERROR", error: '"' + emails[i] + '" is not a valid email address.' };
+      }
     }
 
-    PropertiesService.getScriptProperties().setProperty(GM_NOTIFICATION_EMAIL_PROPERTY, email);
+    PropertiesService.getScriptProperties().setProperty(GM_NOTIFICATION_EMAIL_PROPERTY, emails.join(","));
     installNotificationTrigger_();
-    return { ok: true, data: { email: email, enabled: true } };
+    return { ok: true, data: { emails: emails, enabled: true } };
   } finally {
     lock.releaseLock();
   }
@@ -2411,9 +2428,9 @@ function buildNotificationDigestLines_() {
 
 
 function sendDailyNotificationDigest_() {
-  const email = PropertiesService.getScriptProperties().getProperty(GM_NOTIFICATION_EMAIL_PROPERTY);
+  const emails = getNotificationEmailList_();
 
-  if (!email) {
+  if (emails.length === 0) {
     return;
   }
 
@@ -2424,7 +2441,7 @@ function sendDailyNotificationDigest_() {
   }
 
   MailApp.sendEmail({
-    to: email,
+    to: emails.join(","),
     subject: "GM Money — daily update",
     body: lines.join("\n")
   });
@@ -2432,14 +2449,14 @@ function sendDailyNotificationDigest_() {
 
 
 function apiSendTestNotification_() {
-  const email = PropertiesService.getScriptProperties().getProperty(GM_NOTIFICATION_EMAIL_PROPERTY);
+  const emails = getNotificationEmailList_();
 
-  if (!email) {
-    return { ok: false, code: "VALIDATION_ERROR", error: "Set a notification email first." };
+  if (emails.length === 0) {
+    return { ok: false, code: "VALIDATION_ERROR", error: "Add a notification email first." };
   }
 
   MailApp.sendEmail({
-    to: email,
+    to: emails.join(","),
     subject: "GM Money — test notification",
     body: "This is a test notification from GM Money. If you're seeing this, email notifications are working correctly."
   });

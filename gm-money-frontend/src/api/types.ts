@@ -151,7 +151,7 @@ export type DashboardData = {
 };
 
 export type NotificationSettings = {
-  email: string;
+  emails: string[];
   enabled: boolean;
 };
 
