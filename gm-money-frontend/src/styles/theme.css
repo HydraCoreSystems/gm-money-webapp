@@ -499,7 +499,10 @@ body {
   position: relative;
   background: var(--gm-gradient-brand);
   border-radius: var(--gm-radius-tile);
-  padding: 1.4rem 1.4rem 1.6rem;
+  /* Extra bottom padding makes room for the metro tiles below to pull
+     up and overlap this hero via negative margin -- literal layered
+     depth (matching the approved mockup), not just a bigger shadow. */
+  padding: 1.4rem 1.4rem 3.2rem;
   color: #f4f7f2;
   overflow: hidden;
   box-shadow: var(--gm-shadow-tile);
@@ -513,6 +516,17 @@ body {
   height: 220px;
   background: radial-gradient(circle, rgba(217, 164, 65, 0.32), transparent 70%);
   pointer-events: none;
+}
+
+.gm-dashboard-hero__who {
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 0.45rem;
+  margin-bottom: 0.9rem;
+  font-size: 0.82rem;
+  font-weight: 600;
+  position: relative;
 }
 
 .gm-dashboard-hero__row {
@@ -540,9 +554,11 @@ body {
 }
 
 .gm-metro-grid {
+  position: relative;
   display: grid;
   grid-template-columns: repeat(2, 1fr);
   gap: 0.7rem;
+  margin-top: -2rem;
 }
 
 .gm-metro-tile {

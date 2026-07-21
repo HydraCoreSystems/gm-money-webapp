@@ -1,11 +1,16 @@
 import { useEffect, useState } from "react";
 import { Cell, Pie, PieChart, ResponsiveContainer, Tooltip } from "recharts";
-import { callApi } from "../../api/client";
+import { callApi, getStoredEnteredBy } from "../../api/client";
 import type { DashboardData } from "../../api/types";
 import { Avatar } from "../shared/Avatar";
 
 function formatMoney(amount: number): string {
   const sign = amount < 0 ? "-" : "";
+  return `${sign}$${Math.abs(amount).toFixed(2)}`;
+}
+
+function formatMoneySigned(amount: number): string {
+  const sign = amount < 0 ? "-" : "+";
   return `${sign}$${Math.abs(amount).toFixed(2)}`;
 }
 
@@ -94,9 +99,17 @@ export function DashboardView({ onAuthFailure }: Props) {
   const chartCategories =
     otherTotal > 0 ? [...topCategories, { category: "Other", amount: otherTotal }] : topCategories;
 
+  const enteredBy = getStoredEnteredBy();
+
   return (
     <div className="gm-dashboard">
       <div className="gm-dashboard-hero">
+        {enteredBy && (
+          <div className="gm-dashboard-hero__who">
+            <Avatar label={enteredBy} size={22} />
+            {enteredBy}
+          </div>
+        )}
         <div className="gm-dashboard-hero__row">
           <div>
             <div className="gm-dashboard-hero__label">Current Cash</div>
@@ -226,7 +239,7 @@ export function DashboardView({ onAuthFailure }: Props) {
                   </div>
                 </div>
                 <div className={t.amount < 0 ? "gm-register-row__amount--negative" : "gm-register-row__amount--positive"}>
-                  {formatMoney(t.amount)}
+                  {formatMoneySigned(t.amount)}
                 </div>
               </div>
             </div>
