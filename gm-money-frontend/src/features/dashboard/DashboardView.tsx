@@ -212,6 +212,37 @@ export function DashboardView({ onAuthFailure }: Props) {
         )}
       </div>
 
+      {data.budgetProgress.length > 0 && (
+        <div className="gm-card gm-card--wide gm-dashboard-panel">
+          <h3 style={{ marginTop: 0 }}>Spending Tracker</h3>
+          <div className="gm-budget-list">
+            {data.budgetProgress.map((b) => {
+              const pct = b.budgeted > 0 ? Math.min(100, (b.spent / b.budgeted) * 100) : 0;
+              const over = b.spent > b.budgeted;
+              return (
+                <div key={b.category} className="gm-budget-row">
+                  <div className="gm-budget-row__top">
+                    <span>{b.category}</span>
+                    <span className={over ? "gm-register-row__amount--negative" : undefined}>
+                      {formatMoney(b.spent)} / {formatMoney(b.budgeted)}
+                    </span>
+                  </div>
+                  <div className="gm-budget-bar">
+                    <div
+                      className="gm-budget-bar__fill"
+                      style={{
+                        width: `${pct}%`,
+                        background: over ? "var(--gm-negative)" : "var(--gm-positive)",
+                      }}
+                    />
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
+
       <div className="gm-card gm-card--wide gm-dashboard-panel">
         <h3 style={{ marginTop: 0 }}>Account Balances</h3>
         <div className="gm-register-list">

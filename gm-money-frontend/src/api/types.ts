@@ -131,6 +131,12 @@ export type DashboardSpendingCategory = {
   amount: number;
 };
 
+export type DashboardBudgetProgress = {
+  category: string;
+  budgeted: number;
+  spent: number;
+};
+
 export type DashboardData = {
   currentCash: number;
   projectedCash: number;
@@ -141,6 +147,12 @@ export type DashboardData = {
   accountBalances: DashboardAccountBalance[];
   recentTransactions: DashboardRecentTransaction[];
   spendingByCategory: DashboardSpendingCategory[];
+  budgetProgress: DashboardBudgetProgress[];
+};
+
+export type BudgetRecord = {
+  category: string;
+  monthlyBudget: number;
 };
 
 export type AddCategoryPayload = {

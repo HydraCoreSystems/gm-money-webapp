@@ -1,6 +1,6 @@
 import { useEffect, useState } from "react";
 import { callApi } from "../../api/client";
-import type { AddCategoryResult, AddSubcategoryResult, FormOptions } from "../../api/types";
+import type { AddCategoryResult, AddSubcategoryResult, BudgetRecord, FormOptions } from "../../api/types";
 
 type Props = {
   onAuthFailure: () => void;
@@ -17,21 +17,35 @@ export function SettingsView({ onAuthFailure }: Props) {
   const [newPaymentMethod, setNewPaymentMethod] = useState("");
   const [busy, setBusy] = useState(false);
 
+  const [budgets, setBudgets] = useState<BudgetRecord[]>([]);
+  const [budgetDrafts, setBudgetDrafts] = useState<Record<string, string>>({});
+
   async function load() {
     setStatus("loading");
-    const result = await callApi<FormOptions>("getFormOptions");
+    const [optionsResult, budgetsResult] = await Promise.all([
+      callApi<FormOptions>("getFormOptions"),
+      callApi<BudgetRecord[]>("getBudgets"),
+    ]);
 
-    if (!result.ok) {
-      if (result.code === "BAD_PASSWORD") {
+    if (!optionsResult.ok) {
+      if (optionsResult.code === "BAD_PASSWORD") {
         onAuthFailure();
         return;
       }
-      setError(result.error);
+      setError(optionsResult.error);
       setStatus("error");
       return;
     }
 
-    setOptions(result.data);
+    setOptions(optionsResult.data);
+
+    if (budgetsResult.ok) {
+      setBudgets(budgetsResult.data);
+      setBudgetDrafts(
+        Object.fromEntries(budgetsResult.data.map((b) => [b.category, String(b.monthlyBudget)]))
+      );
+    }
+
     setStatus("ready");
   }
 
@@ -92,6 +106,22 @@ export function SettingsView({ onAuthFailure }: Props) {
   async function handleDeletePaymentMethod(name: string) {
     if (!window.confirm(`Delete payment method "${name}"?`)) return;
     await withBusy(() => callApi("deletePaymentMethod", { name }));
+  }
+
+  async function handleSaveBudget(category: string) {
+    const monthlyBudget = Number(budgetDrafts[category]);
+    if (!isFinite(monthlyBudget) || monthlyBudget <= 0) return;
+    await withBusy(() => callApi("setBudget", { category, monthlyBudget }));
+  }
+
+  async function handleClearBudget(category: string) {
+    if (!window.confirm(`Stop tracking a budget for "${category}"?`)) return;
+    await withBusy(() => callApi("deleteBudget", { category }));
+    setBudgetDrafts((prev) => {
+      const next = { ...prev };
+      delete next[category];
+      return next;
+    });
   }
 
   if (status === "loading") {
@@ -195,6 +225,52 @@ export function SettingsView({ onAuthFailure }: Props) {
           ))}
         </div>
       ))}
+
+      <h3>Budgets</h3>
+      <p className="gm-register-note">
+        Set a monthly spending plan for any Expense category — shows as a progress bar on the Dashboard.
+        Leave blank for categories you don't want to track.
+      </p>
+
+      {options.categoryGroups
+        .filter((group) => group.type === "Expense")
+        .flatMap((group) => group.categories)
+        .map((cat) => {
+          const hasBudget = budgets.some((b) => b.category === cat.name);
+          return (
+            <div key={cat.name} className="gm-settings-add-row">
+              <span style={{ flex: 1, minWidth: "10rem" }}>{cat.name}</span>
+              <input
+                type="number"
+                step="0.01"
+                min="0.01"
+                placeholder="No budget"
+                value={budgetDrafts[cat.name] ?? ""}
+                onChange={(e) => setBudgetDrafts((prev) => ({ ...prev, [cat.name]: e.target.value }))}
+                disabled={busy}
+                style={{ maxWidth: "7rem" }}
+              />
+              <button
+                type="button"
+                className="gm-link-button"
+                disabled={busy || !(budgetDrafts[cat.name] ?? "").trim()}
+                onClick={() => handleSaveBudget(cat.name)}
+              >
+                Save
+              </button>
+              {hasBudget && (
+                <button
+                  type="button"
+                  className="gm-link-button"
+                  disabled={busy}
+                  onClick={() => handleClearBudget(cat.name)}
+                >
+                  Clear
+                </button>
+              )}
+            </div>
+          );
+        })}
 
       <h3>Payment Methods</h3>
 

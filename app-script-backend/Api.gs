@@ -162,6 +162,15 @@ function handleApiRequest_(e) {
       case "rebuildMerchantMemory":
         return jsonOutput_(apiRebuildMerchantMemory_());
 
+      case "getBudgets":
+        return jsonOutput_({ ok: true, data: apiGetBudgets_() });
+
+      case "setBudget":
+        return jsonOutput_(apiSetBudget_(payload));
+
+      case "deleteBudget":
+        return jsonOutput_(apiDeleteBudget_(payload));
+
       default:
         return jsonError_(
           'Unknown action: "' + action + '".',
@@ -1067,6 +1076,11 @@ function buildDashboardData_() {
   // "Spending by category" pie chart on the home screen, not a
   // separate Reports screen.
   const categoryTotals = {};
+  // Category-only totals (ignoring subcategory) for budget comparison --
+  // a separate accumulator from categoryTotals above, since budgets are
+  // per-category, not per "Category: Subcategory" label. Same entries
+  // walk, no extra sheet reads.
+  const categoryOnlyTotals = {};
 
   entries.forEach(function(entry) {
     const date = entry.date instanceof Date ? entry.date : new Date(entry.date);
@@ -1081,8 +1095,10 @@ function buildDashboardData_() {
       return;
     }
 
+    const amount = Math.abs(Number(entry.amount || 0));
     const label = buildEntryChartGroupLabel_(category, entry.subcategory);
-    categoryTotals[label] = (categoryTotals[label] || 0) + Math.abs(Number(entry.amount || 0));
+    categoryTotals[label] = (categoryTotals[label] || 0) + amount;
+    categoryOnlyTotals[category] = (categoryOnlyTotals[category] || 0) + amount;
   });
 
   const spendingByCategory = Object.keys(categoryTotals)
@@ -1096,6 +1112,14 @@ function buildDashboardData_() {
       return b.amount - a.amount;
     });
 
+  const budgetProgress = apiGetBudgets_().map(function(budget) {
+    return {
+      category: budget.category,
+      budgeted: budget.monthlyBudget,
+      spent: categoryOnlyTotals[budget.category] || 0
+    };
+  });
+
   return {
     currentCash: currentCash,
     projectedCash: currentCash + unclearedNet,
@@ -1107,7 +1131,8 @@ function buildDashboardData_() {
       return { account: b.account, balance: b.balance };
     }),
     recentTransactions: recentTransactions,
-    spendingByCategory: spendingByCategory
+    spendingByCategory: spendingByCategory,
+    budgetProgress: budgetProgress
   };
 }
 
@@ -2098,6 +2123,151 @@ function apiRebuildMerchantMemory_() {
   try {
     rebuildMerchantMemory_();
     return { ok: true, data: { rebuilt: true } };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+/* ============================================================
+   Budgeting / spending plans
+
+   Entirely new -- no equivalent exists anywhere in the Sheets
+   backend (confirmed by grep before planning this milestone).
+   GM_Budgets is a dedicated hidden sheet, same pattern as
+   GM_MerchantMemory / GM_RecurringTransactions: one row per
+   budgeted CATEGORY (never subcategory), Expense-type categories
+   only -- Income categories aren't "budgeted" in this model, same
+   as Money's own Spending Tracker. A category with no row here
+   simply isn't tracked, not "budgeted at $0."
+============================================================ */
+
+const GM_BUDGETS = {
+  SHEET: "GM_Budgets",
+  HEADERS: ["Category", "Monthly Budget", "Updated By", "Updated At"]
+};
+
+function getBudgetsSheet_() {
+  const ss = SpreadsheetApp.getActiveSpreadsheet();
+  let sheet = ss.getSheetByName(GM_BUDGETS.SHEET);
+
+  if (!sheet) {
+    sheet = ss.insertSheet(GM_BUDGETS.SHEET);
+  }
+
+  ensureSheetHeaders_(sheet, GM_BUDGETS.HEADERS);
+  sheet.setFrozenRows(1);
+
+  if (!sheet.isSheetHidden()) {
+    sheet.hideSheet();
+  }
+
+  return sheet;
+}
+
+
+function apiGetBudgets_() {
+  const sheet = getBudgetsSheet_();
+  const values = sheet.getDataRange().getValues();
+
+  if (values.length < 2) {
+    return [];
+  }
+
+  const map = getHeaderMap_(values[0]);
+
+  return values.slice(1)
+    .filter(function(row) {
+      return String(row[map.Category] || "").trim() !== "";
+    })
+    .map(function(row) {
+      return {
+        category: String(row[map.Category] || "").trim(),
+        monthlyBudget: Number(row[map["Monthly Budget"]] || 0)
+      };
+    });
+}
+
+
+function apiSetBudget_(payload) {
+  const category = String(payload.category || "").trim();
+  const monthlyBudget = Number(payload.monthlyBudget);
+
+  if (!category) {
+    return { ok: false, code: "VALIDATION_ERROR", error: "Choose a category." };
+  }
+
+  if (getConfiguredCategoryNames_().indexOf(category) === -1) {
+    return { ok: false, code: "VALIDATION_ERROR", error: 'Unknown category: "' + category + '".' };
+  }
+
+  if (getConfiguredCategoryType_(category) !== "Expense") {
+    return { ok: false, code: "VALIDATION_ERROR", error: "Only Expense categories can have a budget." };
+  }
+
+  if (!isFinite(monthlyBudget) || monthlyBudget <= 0) {
+    return { ok: false, code: "VALIDATION_ERROR", error: "Enter a budget amount greater than zero." };
+  }
+
+  const lock = LockService.getScriptLock();
+
+  if (!lock.tryLock(10000)) {
+    return { ok: false, code: "LOCK_TIMEOUT", error: "The system is busy — try again in a moment." };
+  }
+
+  try {
+    const sheet = getBudgetsSheet_();
+    const values = sheet.getDataRange().getValues();
+    const map = getHeaderMap_(values[0]);
+    const now = new Date();
+
+    for (let i = 1; i < values.length; i++) {
+      if (String(values[i][map.Category] || "").trim() === category) {
+        const row = i + 1;
+        sheet.getRange(row, map["Monthly Budget"] + 1).setValue(monthlyBudget);
+        sheet.getRange(row, map["Updated By"] + 1).setValue("Web App");
+        sheet.getRange(row, map["Updated At"] + 1).setValue(now);
+        invalidateDashboardCache_();
+        return { ok: true, data: { category: category, monthlyBudget: monthlyBudget } };
+      }
+    }
+
+    sheet.appendRow([category, monthlyBudget, "Web App", now]);
+    invalidateDashboardCache_();
+    return { ok: true, data: { category: category, monthlyBudget: monthlyBudget } };
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+
+function apiDeleteBudget_(payload) {
+  const category = String(payload.category || "").trim();
+
+  if (!category) {
+    return { ok: false, code: "VALIDATION_ERROR", error: "Missing category." };
+  }
+
+  const lock = LockService.getScriptLock();
+
+  if (!lock.tryLock(10000)) {
+    return { ok: false, code: "LOCK_TIMEOUT", error: "The system is busy — try again in a moment." };
+  }
+
+  try {
+    const sheet = getBudgetsSheet_();
+    const values = sheet.getDataRange().getValues();
+    const map = getHeaderMap_(values[0]);
+
+    for (let i = 1; i < values.length; i++) {
+      if (String(values[i][map.Category] || "").trim() === category) {
+        sheet.deleteRow(i + 1);
+        invalidateDashboardCache_();
+        return { ok: true, data: { category: category } };
+      }
+    }
+
+    return { ok: false, code: "NOT_FOUND", error: "That budget could not be found." };
   } finally {
     lock.releaseLock();
   }
