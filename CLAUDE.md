@@ -50,11 +50,19 @@ category structure.
   when the owner has budget for something more robust — he was clear this
   is a "for now, until finances allow more" choice, not a permanent
   ceiling.
-- **Auth:** simple password protection is sufficient (not full user
-  accounts). Critically, the password must be checked **server-side by
-  Apps Script on every request**, not just gated by a frontend lock screen —
-  a frontend-only gate would be trivially bypassed by hitting the API URL
-  directly.
+- **Auth:** a single shared password was chosen as a pragmatic **first
+  step**, not a permanent ceiling — the owner was explicit (2026-07-21)
+  that this was never meant to be a "this is how it'll always be done"
+  decision. **Eventual target: real independent user accounts that share
+  the same underlying data, with definable roles per person** (Phil/
+  Crystal today, potentially more later). Treat this as its own future
+  milestone to scope properly when the owner is ready, not as something
+  permanently settled — don't cite "simple password protection is the
+  decision" as a reason to push back on building real accounts later.
+  Until that migration happens, the current rule still holds: the
+  password must be checked **server-side by Apps Script on every
+  request**, not just gated by a frontend lock screen — a frontend-only
+  gate would be trivially bypassed by hitting the API URL directly.
 
 ## First milestone (build this first, get it feeling real before expanding)
 
@@ -204,6 +212,50 @@ polished 2020s product is the point.
 - Red for negative amounts, green for positive — still kept as functional,
   legible, conventional color, distinct from whatever the decorative
   palette becomes.
+
+## AI / intelligence direction (added 2026-07-21 — read this before scoping ANY new feature)
+
+The "modern amenities" half of "Money with modern amenities" is not just
+visual polish (see Design language above) — the owner is explicit
+(2026-07-21) that **AI intelligence is the actual point of building this
+with Claude instead of hiring a generic developer**, and he considers it
+under-delivered so far. His own framing: AI should function as a
+**co-CFO** — not a form that stores numbers, but something that actively
+reasons over the business's real data and offers guidance, flags risk,
+and helps hit goals. Direct quote: "AI should be playing the role of
+co-CFO and always providing guidance and thoughts on how to make our
+business financially better and helping us attain our goals."
+
+**This applies app-wide, not to one screen.** The one place real
+learning/intelligence exists today is Merchant Memory (confidence-scored
+auto-categorization) — genuinely valuable, but narrow. Budgeting shipped
+as flat manual entry (type a number, watch a bar fill) with no use of
+the 2+ years of real categorized transaction history already sitting in
+the Sheet, and the owner correctly called this out as a missed
+opportunity that reflects the app as a whole, not a one-off complaint
+about that single feature.
+
+**Two different tiers of "smarter," worth distinguishing when scoping
+any future feature:**
+1. **Data-driven smarts** — using the app's own historical data to
+   suggest, predict, or flag, without a real AI model call: auto-
+   suggested budgets from trailing spending, mid-month overspend-pace
+   warnings, anomaly flags on unusual transactions. Free, no new
+   infrastructure — the same category of thing Merchant Memory already
+   does.
+2. **Real LLM-backed advisory** — an actual AI model call (e.g. Claude
+   via the Anthropic API, called from Apps Script) producing narrative
+   guidance, answering questions in plain English, reasoning about
+   progress toward the business's goals. Real new infrastructure (API
+   key, per-call cost, latency) unlike everything built in this app so
+   far.
+
+The owner's "co-CFO" framing points at tier 2 as the real target —
+default to treating AI-forward requests as wanting genuine LLM-backed
+reasoning, not statistics dressed up as insight, unless he says
+otherwise. Confirm scope and ongoing cost with him before wiring in a
+real model call, the same way `MailApp`'s first real external side
+effect needed his sign-off.
 
 ## Known pain points this rebuild should specifically solve
 
