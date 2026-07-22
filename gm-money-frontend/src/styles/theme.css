@@ -821,6 +821,12 @@ body {
   transition: width 0.2s ease;
 }
 
+.gm-budget-row__pace-warning {
+  margin: 0.3rem 0 0;
+  font-size: 0.8rem;
+  color: var(--gm-gold);
+}
+
 /* ============================================================
    Wide viewports — on a laptop/desktop the mobile-first 480-640px
    column left a large flat empty margin on either side (the page

@@ -14,6 +14,17 @@ function formatMoneySigned(amount: number): string {
   return `${sign}$${Math.abs(amount).toFixed(2)}`;
 }
 
+// Projects a category's spend-so-far forward to a full-month estimate
+// using how far through the month "today" is — catches "you're going
+// to blow this budget" a couple weeks before it actually happens,
+// rather than only flagging it after the fact once already over.
+function projectMonthEndSpend(spentSoFar: number): number {
+  const now = new Date();
+  const dayOfMonth = now.getDate();
+  const daysInMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  return spentSoFar * (daysInMonth / dayOfMonth);
+}
+
 // Each pie slice gets its own gradient (defined once below, referenced
 // by id) rather than a flat fill — matches the gradient/depth language
 // used everywhere else on this screen.
@@ -219,6 +230,11 @@ export function DashboardView({ onAuthFailure }: Props) {
             {data.budgetProgress.map((b) => {
               const pct = b.budgeted > 0 ? Math.min(100, (b.spent / b.budgeted) * 100) : 0;
               const over = b.spent > b.budgeted;
+              const projected = projectMonthEndSpend(b.spent);
+              // Skip the first few days of the month -- with almost no
+              // days elapsed, one early transaction can extrapolate to
+              // a wildly inflated month-end estimate and cry wolf.
+              const onPaceToExceed = !over && new Date().getDate() >= 5 && projected > b.budgeted;
               return (
                 <div key={b.category} className="gm-budget-row">
                   <div className="gm-budget-row__top">
@@ -236,6 +252,11 @@ export function DashboardView({ onAuthFailure }: Props) {
                       }}
                     />
                   </div>
+                  {onPaceToExceed && (
+                    <p className="gm-budget-row__pace-warning">
+                      On pace to exceed by ~{formatMoney(projected - b.budgeted)} this month
+                    </p>
+                  )}
                 </div>
               );
             })}

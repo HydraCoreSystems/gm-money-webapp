@@ -163,7 +163,10 @@ function handleApiRequest_(e) {
         return jsonOutput_(apiRebuildMerchantMemory_());
 
       case "getBudgets":
-        return jsonOutput_({ ok: true, data: apiGetBudgets_() });
+        return jsonOutput_({
+          ok: true,
+          data: { budgets: apiGetBudgets_(), suggestions: apiGetBudgetSuggestions_() }
+        });
 
       case "setBudget":
         return jsonOutput_(apiSetBudget_(payload));
@@ -182,6 +185,7 @@ function handleApiRequest_(e) {
 
       case "updateNotificationRecipient":
         return jsonOutput_(apiUpdateNotificationRecipient_(payload));
+
 
       case "sendTestNotification":
         return jsonOutput_(apiSendTestNotification_(payload));
@@ -2286,6 +2290,121 @@ function apiDeleteBudget_(payload) {
   } finally {
     lock.releaseLock();
   }
+}
+
+
+const GM_BUDGET_SUGGESTION_MONTHS = 3;
+
+// Trailing average per Expense category over up to GM_BUDGET_SUGGESTION_MONTHS
+// months (the current in-progress month plus prior complete months).
+// Two things this deliberately handles, both discovered against real
+// data rather than assumed:
+// 1. Only categories actually configured in Settings count -- real bank
+//    history can carry stray legacy category text (e.g. "Historical
+//    Expense"/"Historical Income" labels from before this business's
+//    Category/Subcategory structure existed) that getConfiguredCategoryType_
+//    would otherwise silently default to "Expense" for, since its
+//    fallback for an unrecognized name IS "Expense". Those aren't real,
+//    budgetable categories, so they're filtered out explicitly here.
+// 2. The average is divided by however many months in the window
+//    actually had real data for that category, NOT a fixed window size
+//    -- if detailed per-category history only goes back a short way
+//    (e.g. categorization only recently got granular), dividing by a
+//    fixed 3 would silently understate every suggestion by the same
+//    factor. This means suggestions are honest about limited history
+//    today and get steadily more representative as more real months
+//    accumulate, without any code change needed later.
+// The current, still-in-progress month is extrapolated to a full-month
+// estimate (spend-so-far * daysInMonth / dayOfMonth) rather than
+// excluded -- with very little trailing history, that's often the only
+// real signal available, and a rough estimate beats no suggestion.
+function getExpenseCategoryTrailingAverages_(monthsBack) {
+  const manual = getManualTransactionsSheet_();
+  const source = getTillerTransactionsSheet_();
+  const entries = buildRegisterEntries_(manual, source, "");
+  const configuredCategories = getConfiguredCategoryNames_();
+
+  const now = new Date();
+  const currentMonthStart = new Date(now.getFullYear(), now.getMonth(), 1);
+  const currentMonthKey = currentMonthStart.getFullYear() + "-" + currentMonthStart.getMonth();
+  const daysInCurrentMonth = new Date(now.getFullYear(), now.getMonth() + 1, 0).getDate();
+  const dayOfCurrentMonth = now.getDate();
+
+  const monthKeys = [];
+  for (let i = 0; i < monthsBack; i++) {
+    const monthStart = new Date(currentMonthStart.getFullYear(), currentMonthStart.getMonth() - i, 1);
+    monthKeys.push(monthStart.getFullYear() + "-" + monthStart.getMonth());
+  }
+
+  const totalsByCategoryByMonth = {};
+
+  entries.forEach(function(entry) {
+    const date = entry.date instanceof Date ? entry.date : new Date(entry.date);
+
+    if (isNaN(date.getTime())) {
+      return;
+    }
+
+    const monthKey = date.getFullYear() + "-" + date.getMonth();
+
+    if (monthKeys.indexOf(monthKey) === -1) {
+      return;
+    }
+
+    const category = String(entry.category || "").trim();
+
+    if (!category || configuredCategories.indexOf(category) === -1) {
+      return;
+    }
+
+    if (getConfiguredCategoryType_(category) !== "Expense") {
+      return;
+    }
+
+    if (!totalsByCategoryByMonth[category]) {
+      totalsByCategoryByMonth[category] = {};
+    }
+
+    totalsByCategoryByMonth[category][monthKey] =
+      (totalsByCategoryByMonth[category][monthKey] || 0) + Math.abs(Number(entry.amount || 0));
+  });
+
+  const averages = {};
+
+  Object.keys(totalsByCategoryByMonth).forEach(function(category) {
+    const monthTotals = totalsByCategoryByMonth[category];
+    let sum = 0;
+    let usableMonths = 0;
+
+    Object.keys(monthTotals).forEach(function(monthKey) {
+      let amount = monthTotals[monthKey];
+
+      if (monthKey === currentMonthKey && dayOfCurrentMonth > 0) {
+        amount = amount * (daysInCurrentMonth / dayOfCurrentMonth);
+      }
+
+      sum += amount;
+      usableMonths += 1;
+    });
+
+    if (usableMonths > 0) {
+      averages[category] = sum / usableMonths;
+    }
+  });
+
+  return averages;
+}
+
+
+function apiGetBudgetSuggestions_() {
+  const averages = getExpenseCategoryTrailingAverages_(GM_BUDGET_SUGGESTION_MONTHS);
+
+  return Object.keys(averages)
+    .filter(function(category) { return averages[category] >= 1; })
+    .map(function(category) {
+      return { category: category, suggestedAmount: Math.round(averages[category]) };
+    })
+    .sort(function(a, b) { return b.suggestedAmount - a.suggestedAmount; });
 }
 
 

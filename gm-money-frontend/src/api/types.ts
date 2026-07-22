@@ -174,6 +174,16 @@ export type BudgetRecord = {
   monthlyBudget: number;
 };
 
+export type BudgetSuggestion = {
+  category: string;
+  suggestedAmount: number;
+};
+
+export type BudgetsData = {
+  budgets: BudgetRecord[];
+  suggestions: BudgetSuggestion[];
+};
+
 export type AddCategoryPayload = {
   name: string;
   type: "Income" | "Expense";

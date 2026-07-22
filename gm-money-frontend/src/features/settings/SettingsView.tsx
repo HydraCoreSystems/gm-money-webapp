@@ -4,6 +4,8 @@ import type {
   AddCategoryResult,
   AddSubcategoryResult,
   BudgetRecord,
+  BudgetsData,
+  BudgetSuggestion,
   FormOptions,
   NotificationPrefs,
   NotificationRecipient,
@@ -36,6 +38,7 @@ export function SettingsView({ onAuthFailure }: Props) {
 
   const [budgets, setBudgets] = useState<BudgetRecord[]>([]);
   const [budgetDrafts, setBudgetDrafts] = useState<Record<string, string>>({});
+  const [budgetSuggestions, setBudgetSuggestions] = useState<BudgetSuggestion[]>([]);
 
   const [recipients, setRecipients] = useState<NotificationRecipient[]>([]);
   const [recipientDrafts, setRecipientDrafts] = useState<
@@ -50,7 +53,7 @@ export function SettingsView({ onAuthFailure }: Props) {
     setStatus("loading");
     const [optionsResult, budgetsResult, notificationsResult] = await Promise.all([
       callApi<FormOptions>("getFormOptions"),
-      callApi<BudgetRecord[]>("getBudgets"),
+      callApi<BudgetsData>("getBudgets"),
       callApi<NotificationSettings>("getNotificationSettings"),
     ]);
 
@@ -67,10 +70,11 @@ export function SettingsView({ onAuthFailure }: Props) {
     setOptions(optionsResult.data);
 
     if (budgetsResult.ok) {
-      setBudgets(budgetsResult.data);
+      setBudgets(budgetsResult.data.budgets);
       setBudgetDrafts(
-        Object.fromEntries(budgetsResult.data.map((b) => [b.category, String(b.monthlyBudget)]))
+        Object.fromEntries(budgetsResult.data.budgets.map((b) => [b.category, String(b.monthlyBudget)]))
       );
+      setBudgetSuggestions(budgetsResult.data.suggestions);
     }
 
     if (notificationsResult.ok) {
@@ -475,7 +479,9 @@ export function SettingsView({ onAuthFailure }: Props) {
       <h3>Budgets</h3>
       <p className="gm-register-note">
         Set a monthly spending plan for any Expense category — shows as a progress bar on the Dashboard.
-        Leave blank for categories you don't want to track.
+        Leave blank for categories you don't want to track. Suggested amounts are computed from your own
+        real spending history, not guessed cold — they'll get more accurate as more months of categorized
+        history build up.
       </p>
 
       {options.categoryGroups
@@ -483,6 +489,7 @@ export function SettingsView({ onAuthFailure }: Props) {
         .flatMap((group) => group.categories)
         .map((cat) => {
           const hasBudget = budgets.some((b) => b.category === cat.name);
+          const suggestion = budgetSuggestions.find((s) => s.category === cat.name);
           return (
             <div key={cat.name} className="gm-settings-add-row">
               <span style={{ flex: 1, minWidth: "10rem" }}>{cat.name}</span>
@@ -513,6 +520,21 @@ export function SettingsView({ onAuthFailure }: Props) {
                 >
                   Clear
                 </button>
+              )}
+              {suggestion && (
+                <span className="gm-register-note" style={{ flexBasis: "100%", margin: 0 }}>
+                  Suggested ${suggestion.suggestedAmount} based on your recent spending —{" "}
+                  <button
+                    type="button"
+                    className="gm-link-button"
+                    disabled={busy}
+                    onClick={() =>
+                      setBudgetDrafts((prev) => ({ ...prev, [cat.name]: String(suggestion.suggestedAmount) }))
+                    }
+                  >
+                    Use this
+                  </button>
+                </span>
               )}
             </div>
           );
