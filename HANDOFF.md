@@ -1,6 +1,6 @@
 # GM Money — Project Handoff / Current State
 
-**Last updated: 2026-07-25.** This file exists so a fresh session (or a
+**Last updated: 2026-07-25 (major update — see §2b/§5/§7).** This file exists so a fresh session (or a
 different tool, or a different person) can pick this project up cold,
 without depending on chat history or any AI's memory of past sessions.
 Update it whenever a phase completes or a real decision gets made — treat
@@ -69,6 +69,30 @@ gm-money-web/   Next.js 14 (App Router) + React 18 + TypeScript
   Handlers ARE the backend, querying Supabase directly via
   `@supabase/supabase-js` (no ORM), using the **service-role key,
   server-side only** (never exposed to the browser).
+- **MAJOR PIVOT (2026-07-25, discovered mid-session):** the `gm_money`
+  schema this app uses is **NOT** the schema originally designed in
+  `docs/migration-plan.md` — a prior ChatGPT session had already built a
+  more sophisticated, populated schema directly against this same
+  Supabase project (multi-tenant-ready: `businesses`/`business_members`;
+  a unified `transactions` table instead of split manual/bank tables;
+  `transaction_splits`, `transaction_matches`, `counterparties`,
+  `integration_sources`/`sync_runs`/`source_records` as a generic
+  bank-sync framework instead of Tiller-specific mirror tables;
+  `attachments`, `audit_events`). **Confirmed as real, genuine Gathering
+  Moss data** (real payees, real categories, real Tiller Google Sheet ID
+  referenced in `integration_sources`) — 4,674 real transactions spanning
+  2024-07-16 through 2026-07-27. **This existing schema is now what the
+  app is built against — the original from-scratch schema in this
+  document's earlier sections and in `docs/migration-plan.md` is
+  superseded.** `gm-money-web/supabase/schema.sql` has been rewritten to
+  document the REAL adopted schema (reverse-engineered from PostgREST
+  introspection) instead of the original invented one. **The Tiller-sync
+  design in `docs/migration-plan.md` (tiller_* mirror tables, 15-min Apps
+  Script push) is also superseded** — needs a fresh design pass reusing
+  `integration_sources`/`sync_runs`/`source_records` instead. Per the
+  owner's explicit instruction, the app should filter out anything dated
+  before 2026-07-01 (not necessarily delete the old rows — filter at the
+  query level unless he confirms otherwise).
 - Auth: ported near-verbatim from the sibling `skrybix-webapp` repo —
   bcrypt-hashed password in `gm_money.site_auth`, HMAC-SHA256-signed
   session cookie via Web Crypto (`crypto.subtle`, so identical code runs
@@ -113,16 +137,25 @@ gm-money-web/   Next.js 14 (App Router) + React 18 + TypeScript
     Income/Expense category picker with search (replacing native
     `<optgroup>` selects), a Light/Dark/System theme toggle in Settings.
 
-### On the NEW system (`gm-money-web/`) — Phase 0-1 only, just started
+### On the NEW system (`gm-money-web/`) — Phase 0-2ish, further along than the phase numbers suggest
 - Next.js skeleton, styled identically to the just-redone old app
   (`theme.css` copied verbatim into `app/globals.css`).
 - Full auth stack: login page (with the Phil/Crystal picker preserved),
-  session cookie, self-service change-password page.
-- Full Postgres schema **written** (`gm-money-web/supabase/schema.sql`) but
-  **application to the real database is not yet confirmed complete** — see
-  §7 "Immediate blocking issue."
-- A one-time bootstrap script (`scripts/seed-site-auth.mjs`) to set the
-  first password, since there's no signup flow.
+  session cookie, self-service change-password page. **Verified working
+  end-to-end against the real, adopted schema** — real bcrypt password
+  check, real session cookie, real redirect. Password was bootstrapped via
+  `scripts/seed-site-auth.mjs` (random-generated, told to the owner once —
+  he still needs to change it via `/settings/password`).
+- Adopted an **existing, already-populated** Postgres schema (see the
+  pivot note above) rather than the originally-designed one — real
+  Gathering Moss data (4,674 transactions, 78 categories, 61 merchant
+  rules, 2 accounts) is already sitting in it, migrated by a prior ChatGPT
+  session. `gm-money-web/supabase/schema.sql` now documents this real
+  schema. Nothing built so far in `gm-money-web` had to be thrown away —
+  only the login/auth code existed, and it's schema-agnostic (just needed
+  one additive `site_auth` table + a `GRANT`, both applied).
+- Not yet built: any real screen (Dashboard/Register/Entry/etc.) reading
+  the actual business data — the home page is still a placeholder.
 
 ---
 
