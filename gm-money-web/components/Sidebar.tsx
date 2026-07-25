@@ -2,13 +2,15 @@ import { cookies } from "next/headers";
 import { ENTERED_BY_COOKIE_NAME } from "@/lib/session";
 import { logout } from "@/app/login/actions";
 
-// Minimal port of gm-money-frontend/src/layout/Sidebar.tsx -- only
-// "Dashboard" is a real, built screen so far, so that's the only nav item
-// shown for now rather than linking to screens that don't exist yet.
-// Expand NAV_ITEMS as Register/Entry/etc. get built in gm-money-web.
-const NAV_ITEMS: { href: string; label: string; icon: string }[] = [{ href: "/", label: "Dashboard", icon: "●" }];
+// Minimal port of gm-money-frontend/src/layout/Sidebar.tsx -- only real,
+// built screens are listed. Expand as more of gm-money-web gets built.
+const NAV_ITEMS: { href: string; label: string; icon: string }[] = [
+  { href: "/", label: "Dashboard", icon: "●" },
+  { href: "/register", label: "Register", icon: "☰" },
+  { href: "/entry", label: "Entry", icon: "✚" },
+];
 
-export function Sidebar() {
+export function Sidebar({ active }: { active: string }) {
   const enteredBy = cookies().get(ENTERED_BY_COOKIE_NAME)?.value;
 
   return (
@@ -23,7 +25,11 @@ export function Sidebar() {
 
       <nav className="gm-sidebar-nav" aria-label="Main navigation">
         {NAV_ITEMS.map((item) => (
-          <a key={item.href} href={item.href} className="gm-sidebar-nav__item gm-sidebar-nav__item--active">
+          <a
+            key={item.href}
+            href={item.href}
+            className={item.href === active ? "gm-sidebar-nav__item gm-sidebar-nav__item--active" : "gm-sidebar-nav__item"}
+          >
             <span className="gm-nav-ic" aria-hidden="true">
               {item.icon}
             </span>
