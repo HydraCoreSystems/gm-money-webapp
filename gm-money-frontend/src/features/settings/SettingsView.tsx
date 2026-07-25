@@ -1,5 +1,6 @@
 import { useEffect, useState } from "react";
 import { callApi } from "../../api/client";
+import { useTheme, type ThemeMode } from "../../hooks/useTheme";
 import type {
   AddCategoryResult,
   AddSubcategoryResult,
@@ -25,7 +26,14 @@ type Props = {
   onAuthFailure: () => void;
 };
 
+const THEME_OPTIONS: { value: ThemeMode; label: string }[] = [
+  { value: "light", label: "Light" },
+  { value: "dark", label: "Dark" },
+  { value: "system", label: "System" },
+];
+
 export function SettingsView({ onAuthFailure }: Props) {
+  const { mode: themeMode, selectTheme } = useTheme();
   const [status, setStatus] = useState<"loading" | "ready" | "error">("loading");
   const [options, setOptions] = useState<FormOptions | null>(null);
   const [error, setError] = useState("");
@@ -249,6 +257,24 @@ export function SettingsView({ onAuthFailure }: Props) {
       <h2 style={{ marginTop: 0 }}>Settings</h2>
 
       {error && <p className="gm-error">{error}</p>}
+
+      <h3>Appearance</h3>
+      <p className="gm-register-note">
+        "System" follows your device's own light/dark setting automatically. Choosing Light or Dark
+        overrides that just in this app, and is remembered on this device.
+      </p>
+      <div className="gm-who-picker">
+        {THEME_OPTIONS.map((option) => (
+          <button
+            key={option.value}
+            type="button"
+            className={themeMode === option.value ? "gm-who-picker__selected" : undefined}
+            onClick={() => selectTheme(option.value)}
+          >
+            {option.label}
+          </button>
+        ))}
+      </div>
 
       <h3>Notifications</h3>
       <p className="gm-register-note">

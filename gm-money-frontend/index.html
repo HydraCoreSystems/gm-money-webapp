@@ -11,6 +11,19 @@
       rel="stylesheet"
     />
     <title>GM Money</title>
+    <script>
+      // Applied before first paint so a stored light/dark choice never flashes
+      // the wrong theme. "system" (the default) stores nothing here and lets
+      // the CSS prefers-color-scheme media query decide instead.
+      (function () {
+        try {
+          var stored = localStorage.getItem("gm_money_theme");
+          if (stored === "light" || stored === "dark") {
+            document.documentElement.setAttribute("data-theme", stored);
+          }
+        } catch (e) {}
+      })();
+    </script>
   </head>
   <body>
     <div id="root"></div>

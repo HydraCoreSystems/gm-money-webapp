@@ -59,6 +59,55 @@
   }
 }
 
+/* An explicit Settings choice (Light/Dark) overrides the OS preference
+   above in either direction; "System" leaves data-theme unset so the
+   media query keeps deciding. */
+:root[data-theme="dark"] {
+  --ink: #eef4ee;
+  --muted: #9fb0a4;
+  --faint: #71887a;
+  --surface: #1b2620;
+  --line: rgba(255, 255, 255, 0.09);
+  --line-strong: rgba(255, 255, 255, 0.16);
+  --sage-tint: rgba(45, 93, 69, 0.35);
+  --amber-tint: rgba(185, 119, 37, 0.22);
+
+  --negative: #e2776f;
+  --negative-tint: rgba(226, 119, 111, 0.14);
+  --positive: #5fae7c;
+  --positive-tint: rgba(95, 174, 124, 0.14);
+  --amber: #d99a4f;
+
+  --overview-tint-a: #223a2f;
+  --overview-tint-b: #1a2a22;
+
+  --shadow-card: 0 14px 30px rgba(0, 0, 0, 0.4), 0 0 0 1px rgba(255, 255, 255, 0.06);
+  --shadow-tile: 0 10px 22px rgba(0, 0, 0, 0.35), 0 0 0 1px rgba(255, 255, 255, 0.05);
+}
+
+:root[data-theme="light"] {
+  --ink: #1d2c25;
+  --muted: #6f7d74;
+  --faint: #97a49a;
+  --surface: #ffffff;
+  --line: #e5e8e2;
+  --line-strong: #d3d8cd;
+  --sage-tint: #eaf1e6;
+  --amber-tint: #f6ead7;
+
+  --negative: #b3413a;
+  --negative-tint: rgba(179, 65, 58, 0.08);
+  --positive: #2d5d45;
+  --positive-tint: rgba(45, 93, 69, 0.08);
+  --amber: #b97725;
+
+  --overview-tint-a: #f3f7ef;
+  --overview-tint-b: #fafbf8;
+
+  --shadow-card: 0 8px 26px rgba(27, 61, 38, 0.05);
+  --shadow-tile: 0 7px 20px rgba(27, 61, 38, 0.04);
+}
+
 * {
   box-sizing: border-box;
 }
@@ -75,6 +124,14 @@ body {
   body {
     background: linear-gradient(180deg, #141c17, #0f1512);
   }
+}
+
+:root[data-theme="dark"] body {
+  background: linear-gradient(180deg, #141c17, #0f1512);
+}
+
+:root[data-theme="light"] body {
+  background: linear-gradient(180deg, #f7f8f5, #f2f4f0);
 }
 
 button,
