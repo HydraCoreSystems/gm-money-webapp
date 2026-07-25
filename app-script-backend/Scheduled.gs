@@ -1092,7 +1092,10 @@ function getRecurringTransactionsSheet_() {
     "Updated By",
     "Updated At",
     "Last Generated Due",
-    "Payment Method"
+    "Payment Method",
+    "Occurrence Limit",
+    "Occurrences Generated",
+    "Completed At"
   ];
 
   ensureSheetHeaders_(sheet, requiredHeaders);
