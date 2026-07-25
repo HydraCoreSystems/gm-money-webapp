@@ -176,14 +176,19 @@ gm-money-web/   Next.js 14 (App Router) + React 18 + TypeScript
 
 ## 4. In-progress / missing
 
-Everything else in the approved migration plan (see §8 for the phase
-list) — the new system currently has **zero real data, zero business
-logic ported, and cannot be used for anything real yet.** Specifically
-still to build: the Tiller sync mechanism, Register's dedup/running-balance
-algorithm, Dashboard, all 35 original actions' equivalents as Server
-Actions, cron jobs for the daily scheduled-transaction generator and
-notification digest, the real data migration (Sheets → Postgres), the
-parallel-run verification window, and the actual cutover.
+**Done so far in `gm-money-web`**: auth (login/logout/change-password),
+Dashboard, Register, Entry — all real, all verified against live data
+(see §3). **Still to build**: Review (bank-transaction categorization
+queue), Settings (categories/payment-methods CRUD, budgets management),
+Scheduled/recurring transactions, Merchant Memory, the notification
+digest (port the logic, sending stays stubbed), an ongoing Tiller sync
+mechanism (nothing keeps `gm_money`'s data fresh right now — it's a
+frozen snapshot from whenever the prior ChatGPT session migrated it;
+needs a fresh design reusing `integration_sources`/`sync_runs`/
+`source_records`, since the original tiller_*-mirror-table plan in
+`docs/migration-plan.md` no longer applies to the adopted schema), cron
+jobs, a Vercel project for `gm-money-web`, the parallel-run verification
+window, and the actual cutover (§9).
 
 Beyond the migration, explicitly deferred (not started, not scoped in
 detail yet):
@@ -291,42 +296,20 @@ never collide with HydraCloud's own `public.*` tables in the same project.
 
 ## 7. Known bugs, blockers, and the immediate next step
 
-### Immediate blocking issue (as of this update)
-`gm-money-web/supabase/schema.sql` was pasted into Supabase's SQL Editor
-for the HydraCloud project and run, but errored with
-`ERROR: 42P07: relation "categories" already exists`. This almost
-certainly means the script was run twice (the first run likely succeeded
-completely — `create schema if not exists` is idempotent, but plain
-`create table` is not, so a second run fails immediately at the very first
-table). **Needs confirmation, not assumption** — run this exact read-only,
-100%-safe query in the same SQL Editor and check the output against the 16
-tables schema.sql defines:
+**RESOLVED, kept here for history**: the original schema-collision error
+(`relation "categories" already exists`) and the "gm_money not exposed"
+issue are both fully resolved — see §2b's pivot note. `gm_money` is
+exposed, `site_auth` exists with the correct grants, login/Dashboard/
+Register/Entry are all verified working against real data. No live
+blocker remains from that episode.
 
-```sql
-select table_name from information_schema.tables where table_schema = 'gm_money' order by table_name;
-```
-
-Expected full list (16 tables) if the first run succeeded completely:
-`app_config, budgets, categories, frequencies, manual_transactions,
-merchant_memory, notification_recipients, payment_methods,
-recurring_transactions, site_auth, subcategories, tiller_accounts,
-tiller_balance_history, tiller_categories, tiller_transactions,
-transaction_meta`
-
-If any are missing, re-run only the `create table` statements for the
-missing ones (skip `create schema if not exists gm_money;` — already
-applied — and skip any table that already exists, or you'll hit the same
-error again).
-
-### Separate, definitely-not-done-yet blocker
-**`gm_money` has not yet been added to Supabase's exposed schemas.**
-Confirmed directly via a live `curl` to the project's REST API just now —
-every table request returns `PGRST106: Invalid schema: gm_money`,
-regardless of whether the tables themselves exist. This is a **separate
-dashboard setting** from running the SQL: **Settings → API → Exposed
-schemas** (sometimes shown under "Data API") → add `gm_money` → Save. The
-app cannot query anything at all until this is done, independent of
-whether the table-creation issue above is resolved.
+**Currently no hard blocker** — the natural next step (Review, Settings,
+or the Tiller sync design) can start any time. The main open gap is that
+nothing keeps `gm_money`'s data fresh yet (no live Tiller sync built), so
+the data is a point-in-time snapshot, not live — not urgent as long as
+`gm-money-frontend`/`app-script-backend` remain the live system of
+record (§9), but worth prioritizing before too much new real activity
+happens in the old system that the new one won't see.
 
 ### Other known issues, lower priority
 - `npm install` in `gm-money-web` surfaces 2 high-severity `npm audit`
@@ -343,24 +326,34 @@ whether the table-creation issue above is resolved.
 
 ## 8. Next concrete tasks, in order
 
-1. **Resolve the schema-application ambiguity above** — run the diagnostic
-   query, fix any partially-applied state.
-2. **Confirm `gm_money` is added to Supabase's exposed schemas** (dashboard
-   step, owner must do it — no API/SQL way to do this from code).
-3. Once both are confirmed: run `npm run seed-site-auth` inside
-   `gm-money-web/` (can be done by Claude directly — it's just a script
-   hitting the already-configured Supabase REST API, not a dashboard
-   action) to bootstrap the first password, then verify login end-to-end
-   in a browser.
-4. Continue through the full phased plan (schema ✅ almost done → auth ✅
-   mostly done → **migration script** → **Tiller sync** → **Register +
-   Dashboard + Settings + Budgets ported** → **all write paths ported** →
-   **cron jobs + visual parity polish** → **parallel-run verification
-   window** → **actual cutover, explicit go-ahead required** → **cleanup**).
-   **The full detail for every one of these phases (exact schema, exact
-   file layout, exact algorithm-porting approach, exact cutover strategy)
-   is written out in full in the approved plan — see §10 below for where
-   that lives and why it should probably be copied into this repo.**
+1. **Review screen** — the bank-fed transaction categorization queue
+   (`transactions` where `source='tiller' and category_id is null`,
+   same query already used for Dashboard's "Pending Review" count in
+   `lib/dashboard.ts` — reuse that filter). Approving one should also
+   handle the Tiller-Categories-sheet write-back requirement (§5.2) —
+   that part needs the Tiller sync mechanism (next item) to exist first,
+   or a temporary stub.
+2. **Design + build the ongoing Tiller sync mechanism**, reusing
+   `integration_sources`/`sync_runs`/`source_records` (the adopted
+   schema's own generic bank-sync framework) instead of the superseded
+   tiller_*-mirror-table plan in `docs/migration-plan.md`. This is the
+   biggest remaining architectural gap — nothing keeps the data fresh
+   right now.
+3. **Settings** (categories/payment-methods management, budgets) and
+   **Scheduled/recurring transactions** — both fairly mechanical CRUD
+   against tables that already exist and are understood
+   (`recurring_transactions`, `budgets`).
+4. **Merchant Memory** screen, porting the confidence-learning algorithm
+   (§5.4) against the adopted schema's `merchant_rules` table.
+5. Notification digest logic (port fully, sending stays stubbed per the
+   owner's "skip for now"), cron jobs (Vercel Cron, per
+   `docs/migration-plan.md` §5 for the exact config pattern — routes/
+   schedule still valid even though the underlying tables changed).
+6. Set up a Vercel project for `gm-money-web` (Root Directory =
+   `gm-money-web`, same repo) once there's a full enough app to be worth
+   previewing live.
+7. **Parallel-run verification window**, then the **actual cutover** —
+   requires the owner's explicit go-ahead, not autonomous (§9).
 
 ---
 
@@ -400,11 +393,20 @@ app-script-backend/                -- OLD live backend (Apps Script), DO NOT BRE
   Automation.gs                   -- scheduled-transaction daily generator
   Transactions.gs                 -- Tiller category-registration write-back logic
 gm-money-web/                      -- NEW system, in progress
-  supabase/schema.sql              -- full Postgres DDL (source of truth for the schema)
-  lib/supabase.ts                  -- Supabase client, scoped to gm_money schema
+  supabase/schema.sql              -- documents the REAL adopted schema (reverse-engineered), not a script to re-run
+  lib/supabase.ts                  -- Supabase client scoped to gm_money schema + getBusinessId()
   lib/session.ts, lib/site-auth-db.ts, middleware.ts  -- auth (ported from skrybix-webapp)
+  lib/dashboard.ts                 -- Dashboard queries (balances, income/expense, pending review/uncleared)
+  lib/register.ts                  -- Register: running-balance algorithm + manual/bank dedup heuristic
+  lib/categories.ts                -- reshapes the parent_id-hierarchy categories table into {type, categories:[{subcategories}]}
+  components/Sidebar.tsx           -- minimal port, expand NAV_ITEMS as more screens land
+  components/CategoryPicker.tsx    -- nested Income/Expense picker, adapted for uuid category/subcategory ids
+  components/EntryForm.tsx         -- client component wrapping CategoryPicker + the rest of the entry form
+  app/page.tsx                     -- real Dashboard
+  app/register/page.tsx            -- real Register (account switcher via ?account=<uuid>)
+  app/entry/{page,actions}.tsx     -- real Entry (Server Action does the insert + category-type/sign validation)
   app/login/, app/settings/password/  -- login + change-password pages
-  scripts/seed-site-auth.mjs        -- one-time first-password bootstrap
+  scripts/seed-site-auth.mjs        -- one-time first-password bootstrap (already run — password given to owner once)
   .env.local                       -- SECRETS, gitignored, not in this handoff — see below
 ```
 
