@@ -70,13 +70,15 @@ function computeOccurrences(items: ScheduledTransaction[], viewYear: number, vie
     .forEach((item) => {
       let cursor = parseDateOnly(item.nextDue);
       let guard = 0;
+      let projectedCount = 0;
+      const remaining = item.remainingOccurrences;
 
       // A capped walk, not a true recurrence-rule engine: fast-forwards
       // through any occurrences before this month (e.g. an overdue
       // schedule that hasn't been processed yet) without displaying
       // them, then records every occurrence that falls within the
       // visible month -- more than one for Weekly/Every 2 Weeks.
-      while (cursor <= rangeEnd && guard < 500) {
+      while (cursor <= rangeEnd && guard < 500 && (remaining === null || projectedCount < remaining)) {
         if (cursor >= rangeStart) {
           occurrences.push({
             date: formatDateOnly(cursor),
@@ -88,6 +90,7 @@ function computeOccurrences(items: ScheduledTransaction[], viewYear: number, vie
           });
         }
         cursor = addFrequency(cursor, item.frequency);
+        projectedCount++;
         guard++;
       }
     });
