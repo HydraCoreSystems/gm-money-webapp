@@ -1,20 +1,16 @@
 // A small colored initial-bubble used on every list row (Register,
-// Review, Scheduled, Merchants, Dashboard recent transactions) for the
-// "layered/dimensional" look — same gradient + shadow language as the
-// rest of the redesign, just applied at icon scale. Color is a stable
-// hash of the label, so the same payee/merchant always gets the same
-// color rather than shifting per list position.
+// Review, Scheduled, Merchants, Dashboard recent transactions). Color is
+// a stable hash of the label, so the same payee/merchant always gets the
+// same color rather than shifting per list position. Palette is drawn
+// only from the app's own forest/moss/amber family (not an arbitrary
+// rainbow) to stay consistent with the rest of the redesign.
 const AVATAR_GRADIENTS: [string, string][] = [
-  ["#1c7a4a", "#52b788"],
-  ["#7a4a1c", "#c99a4a"],
-  ["#7a2456", "#c34b8e"],
-  ["#3d3480", "#7c5cd9"],
-  ["#123d25", "#2e8b57"],
-  ["#0f6e56", "#1d9e75"],
-  ["#185fa5", "#378add"],
-  ["#a8391f", "#e0703f"],
-  ["#5f6f65", "#8a978d"],
-  ["#8a6300", "#d9a441"],
+  ["#17372a", "#2f5d45"],
+  ["#2f5d45", "#557d55"],
+  ["#1c4b3a", "#3d7f63"],
+  ["#8a5b1d", "#b97725"],
+  ["#3a4d43", "#5c6f64"],
+  ["#6b4423", "#a06830"],
 ];
 
 function hashString(text: string): number {

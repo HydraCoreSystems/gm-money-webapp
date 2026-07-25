@@ -26,19 +26,19 @@ function projectMonthEndSpend(spentSoFar: number): number {
 }
 
 // Each pie slice gets its own gradient (defined once below, referenced
-// by id) rather than a flat fill — matches the gradient/depth language
-// used everywhere else on this screen.
+// by id) rather than a flat fill. Palette stays within the app's own
+// forest/moss/amber family rather than an arbitrary rainbow.
 const PIE_GRADIENTS = [
-  ["#1c7a4a", "#52b788"],
-  ["#d9a441", "#f0cd83"],
-  ["#a8391f", "#e0703f"],
-  ["#123d25", "#2e8b57"],
-  ["#7a2456", "#c34b8e"],
-  ["#3d3480", "#7c5cd9"],
-  ["#0f6e56", "#1d9e75"],
-  ["#185fa5", "#378add"],
+  ["#17372a", "#2f5d45"],
+  ["#2f5d45", "#557d55"],
+  ["#557d55", "#8fa98a"],
+  ["#8a5b1d", "#b97725"],
+  ["#b97725", "#d9a15a"],
+  ["#1c4b3a", "#3d7f63"],
+  ["#3a4d43", "#5c6f64"],
+  ["#6b4423", "#a06830"],
 ];
-const PIE_OTHER_GRADIENT = ["#5f6f65", "#8a978d"];
+const PIE_OTHER_GRADIENT = ["#97a49a", "#c7cfc4"];
 
 // Money's own home screen (per the screenshot the user shared) only
 // shows a handful of pie slices plus a "More…" catch-all — a full
@@ -114,43 +114,47 @@ export function DashboardView({ onAuthFailure }: Props) {
 
   return (
     <div className="gm-dashboard">
-      <div className="gm-dashboard-hero">
+      <div className="gm-overview-card">
         {enteredBy && (
-          <div className="gm-dashboard-hero__who">
+          <div className="gm-overview-card__who">
             <Avatar label={enteredBy} size={22} />
             {enteredBy}
           </div>
         )}
-        <div className="gm-dashboard-hero__row">
+        <div className="gm-overview-card__row">
           <div>
-            <div className="gm-dashboard-hero__label">Current Cash</div>
-            <div className="gm-dashboard-hero__value">{formatMoney(data.currentCash)}</div>
+            <div className="gm-overview-card__label">Current Cash</div>
+            <div className="gm-overview-card__value">{formatMoney(data.currentCash)}</div>
           </div>
           <div>
-            <div className="gm-dashboard-hero__label">Projected Cash</div>
-            <div className="gm-dashboard-hero__value gm-dashboard-hero__value--secondary">
+            <div className="gm-overview-card__label">Projected Cash</div>
+            <div className="gm-overview-card__value gm-overview-card__value--secondary">
               {formatMoney(data.projectedCash)}
             </div>
           </div>
         </div>
       </div>
 
-      <div className="gm-metro-grid">
-        <div className="gm-metro-tile gm-metro-tile--income">
-          <div className="gm-metro-tile__label">Income This Month</div>
-          <div className="gm-metro-tile__value">{formatMoney(data.incomeThisMonth)}</div>
+      <div className="gm-stat-tile-row">
+        <div className="gm-stat-tile">
+          <span className="gm-stat-tile__label">Income This Month</span>
+          <span className="gm-stat-tile__value gm-stat-tile__value--income">
+            {formatMoney(data.incomeThisMonth)}
+          </span>
         </div>
-        <div className="gm-metro-tile gm-metro-tile--expenses">
-          <div className="gm-metro-tile__label">Expenses This Month</div>
-          <div className="gm-metro-tile__value">{formatMoney(data.expensesThisMonth)}</div>
+        <div className="gm-stat-tile">
+          <span className="gm-stat-tile__label">Expenses This Month</span>
+          <span className="gm-stat-tile__value gm-stat-tile__value--expenses">
+            {formatMoney(data.expensesThisMonth)}
+          </span>
         </div>
-        <div className="gm-metro-tile gm-metro-tile--review">
-          <div className="gm-metro-tile__label">Pending Review</div>
-          <div className="gm-metro-tile__value">{data.pendingReviewCount}</div>
+        <div className="gm-stat-tile">
+          <span className="gm-stat-tile__label">Pending Review</span>
+          <span className="gm-stat-tile__value gm-stat-tile__value--review">{data.pendingReviewCount}</span>
         </div>
-        <div className="gm-metro-tile gm-metro-tile--uncleared">
-          <div className="gm-metro-tile__label">Uncleared</div>
-          <div className="gm-metro-tile__value">{data.unclearedCount}</div>
+        <div className="gm-stat-tile">
+          <span className="gm-stat-tile__label">Uncleared</span>
+          <span className="gm-stat-tile__value gm-stat-tile__value--uncleared">{data.unclearedCount}</span>
         </div>
       </div>
 
@@ -248,7 +252,7 @@ export function DashboardView({ onAuthFailure }: Props) {
                       className="gm-budget-bar__fill"
                       style={{
                         width: `${pct}%`,
-                        background: over ? "var(--gm-negative)" : "var(--gm-positive)",
+                        background: over ? "var(--negative)" : "var(--positive)",
                       }}
                     />
                   </div>

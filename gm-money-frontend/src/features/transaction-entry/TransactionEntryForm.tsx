@@ -69,10 +69,19 @@ export function TransactionEntryForm({ formOptions: options, onAuthFailure }: Pr
     setNotes("");
   }
 
-  return (
-    <div className="gm-card">
-      <h2 style={{ marginTop: 0 }}>New Transaction</h2>
+  function handleDiscard() {
+    setPayee("");
+    setAmountText("");
+    setNotes("");
+    setSubmitError("");
+    setSuccessMessage("");
+    setSubmitStatus("idle");
+  }
 
+  const enteredBy = getStoredEnteredBy();
+
+  return (
+    <div className="gm-card gm-card--wide">
       {submitError && <p className="gm-error">{submitError}</p>}
       {submitStatus === "success" && <p className="gm-success">{successMessage}</p>}
 
@@ -101,9 +110,22 @@ export function TransactionEntryForm({ formOptions: options, onAuthFailure }: Pr
           onNotesChange={setNotes}
         />
 
-        <button type="submit" className="gm-button" disabled={submitStatus === "submitting"}>
-          {submitStatus === "submitting" ? "Saving…" : "Save Transaction"}
-        </button>
+        <div className="gm-panel-foot">
+          <span>
+            Entered by {enteredBy || "you"} · will show as Uncleared until it matches the bank feed
+          </span>
+          <button
+            type="button"
+            className="gm-button gm-button--secondary"
+            onClick={handleDiscard}
+            disabled={submitStatus === "submitting"}
+          >
+            Discard
+          </button>
+          <button type="submit" className="gm-button gm-button--glow" disabled={submitStatus === "submitting"}>
+            {submitStatus === "submitting" ? "Saving…" : "Save transaction"}
+          </button>
+        </div>
       </form>
     </div>
   );

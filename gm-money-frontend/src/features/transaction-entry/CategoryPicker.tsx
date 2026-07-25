@@ -1,4 +1,4 @@
-import { useId, type ChangeEvent } from "react";
+import { useEffect, useMemo, useRef, useState, type KeyboardEvent } from "react";
 import type { CategoryGroup } from "../../api/types";
 
 type Props = {
@@ -9,55 +9,171 @@ type Props = {
 };
 
 export function CategoryPicker({ groups, category, subcategory, onChange }: Props) {
-  const uid = useId();
+  const [open, setOpen] = useState(false);
+  const [query, setQuery] = useState("");
+  const rootRef = useRef<HTMLDivElement>(null);
+  const searchRef = useRef<HTMLInputElement>(null);
+
   const selectedGroup = groups.find((g) => g.categories.some((c) => c.name === category));
   const selectedCategory = selectedGroup?.categories.find((c) => c.name === category);
+  const derivedType = selectedGroup?.type;
 
-  function handleCategoryChange(e: ChangeEvent<HTMLSelectElement>) {
-    const name = e.target.value;
-    const group = groups.find((g) => g.categories.some((c) => c.name === name));
-    if (!group) return;
-    onChange({ category: name, subcategory: "", type: group.type });
+  useEffect(() => {
+    if (!open) return;
+
+    function handleClickOutside(e: MouseEvent) {
+      if (rootRef.current && !rootRef.current.contains(e.target as Node)) {
+        setOpen(false);
+        setQuery("");
+      }
+    }
+
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, [open]);
+
+  useEffect(() => {
+    if (open) searchRef.current?.focus();
+  }, [open]);
+
+  function handleKeyDown(e: KeyboardEvent<HTMLDivElement>) {
+    if (e.key === "Escape") {
+      setOpen(false);
+      setQuery("");
+    }
   }
 
-  function handleSubcategoryChange(e: ChangeEvent<HTMLSelectElement>) {
-    if (!selectedGroup) return;
-    onChange({ category, subcategory: e.target.value, type: selectedGroup.type });
+  function selectSubcategory(next: { category: string; subcategory: string; type: "Income" | "Expense" }) {
+    onChange(next);
+    setOpen(false);
+    setQuery("");
   }
+
+  const filteredGroups = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return groups;
+
+    return groups
+      .map((group) => ({
+        ...group,
+        categories: group.categories
+          .map((cat) => {
+            const categoryMatches = cat.name.toLowerCase().includes(q);
+            const matchingSubs = cat.subcategories.filter((sub) => sub.toLowerCase().includes(q));
+            if (categoryMatches) return cat;
+            if (matchingSubs.length > 0) return { ...cat, subcategories: matchingSubs };
+            return null;
+          })
+          .filter((cat): cat is CategoryGroup["categories"][number] => cat !== null),
+      }))
+      .filter((group) => group.categories.length > 0);
+  }, [groups, query]);
+
+  const displayLabel = !category
+    ? null
+    : selectedCategory && selectedCategory.subcategories.length > 0 && subcategory
+      ? { category, subcategory }
+      : { category, subcategory: "" };
 
   return (
-    <>
-      <div className="gm-field">
-        <label htmlFor={`${uid}-category`}>Category</label>
-        <select id={`${uid}-category`} value={category} onChange={handleCategoryChange} required>
-          <option value="" disabled>
-            Choose a category…
-          </option>
-          {groups.map((group) => (
-            <optgroup key={group.type} label={group.type}>
-              {group.categories.map((cat) => (
-                <option key={cat.name} value={cat.name}>
-                  {cat.name}
-                </option>
-              ))}
-            </optgroup>
-          ))}
-        </select>
-      </div>
+    <div className="gm-category-picker" ref={rootRef} onKeyDown={handleKeyDown}>
+      <button
+        type="button"
+        className={open ? "gm-category-picker__display gm-category-picker__display--open" : "gm-category-picker__display"}
+        onClick={() => setOpen((o) => !o)}
+        aria-haspopup="listbox"
+        aria-expanded={open}
+      >
+        {displayLabel ? (
+          <span className="gm-category-picker__chosen">
+            <strong>{displayLabel.category}</strong>
+            {displayLabel.subcategory && (
+              <>
+                <span>›</span>
+                <strong>{displayLabel.subcategory}</strong>
+              </>
+            )}
+          </span>
+        ) : (
+          <span className="gm-category-picker__placeholder">Choose a category…</span>
+        )}
+        {derivedType && (
+          <span
+            className={
+              derivedType === "Income"
+                ? "gm-category-picker__type-tag gm-category-picker__type-tag--income"
+                : "gm-category-picker__type-tag"
+            }
+          >
+            {derivedType}
+          </span>
+        )}
+      </button>
 
-      {selectedCategory && selectedCategory.subcategories.length > 0 && (
-        <div className="gm-field">
-          <label htmlFor={`${uid}-subcategory`}>Subcategory</label>
-          <select id={`${uid}-subcategory`} value={subcategory} onChange={handleSubcategoryChange}>
-            <option value="">(none)</option>
-            {selectedCategory.subcategories.map((sub) => (
-              <option key={sub} value={sub}>
-                {sub}
-              </option>
+      <p className="gm-category-picker__hint">
+        Tap to change — grouped by Income and Expense, just like Money's category tree.
+      </p>
+
+      {open && (
+        <div className="gm-category-picker__panel">
+          <div className="gm-category-picker__search">
+            <input
+              ref={searchRef}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              placeholder="Search categories or subcategories…"
+            />
+          </div>
+
+          <div className="gm-category-picker__list" role="listbox">
+            {filteredGroups.length === 0 && <p className="gm-category-picker__empty">No matches.</p>}
+
+            {filteredGroups.map((group) => (
+              <div key={group.type}>
+                <div className="gm-category-picker__group-label">{group.type}</div>
+                {group.categories.map((cat) =>
+                  cat.subcategories.length === 0 ? (
+                    <button
+                      key={cat.name}
+                      type="button"
+                      className={
+                        category === cat.name
+                          ? "gm-category-picker__subcat gm-category-picker__subcat--category-only gm-category-picker__subcat--selected"
+                          : "gm-category-picker__subcat gm-category-picker__subcat--category-only"
+                      }
+                      onClick={() => selectSubcategory({ category: cat.name, subcategory: "", type: group.type })}
+                    >
+                      {cat.name}
+                    </button>
+                  ) : (
+                    <div key={cat.name}>
+                      <div className="gm-category-picker__category-label">{cat.name}</div>
+                      {cat.subcategories.map((sub) => {
+                        const selected = category === cat.name && subcategory === sub;
+                        return (
+                          <button
+                            key={sub}
+                            type="button"
+                            className={
+                              selected
+                                ? "gm-category-picker__subcat gm-category-picker__subcat--selected"
+                                : "gm-category-picker__subcat"
+                            }
+                            onClick={() => selectSubcategory({ category: cat.name, subcategory: sub, type: group.type })}
+                          >
+                            <span className="gm-category-picker__check">{selected ? "✓" : ""}</span>
+                            {sub}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  ),
+                )}
+              </div>
             ))}
-          </select>
+          </div>
         </div>
       )}
-    </>
+    </div>
   );
 }

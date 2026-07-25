@@ -49,54 +49,56 @@ export function TransactionFields({
 
   return (
     <>
-      <div className="gm-field">
-        <label htmlFor={`${uid}-date`}>Date</label>
-        <input
-          id={`${uid}-date`}
-          type="date"
-          value={date}
-          onChange={(e) => onDateChange(e.target.value)}
-          required
-        />
+      <div className="gm-section-heading">
+        <div className="gm-section-heading__icon">$</div>
+        <div>
+          <h2>What happened?</h2>
+          <p>
+            The category you choose below decides Income or Expense for this transaction — there's no
+            separate type field to get out of sync.
+          </p>
+        </div>
       </div>
 
-      <div className="gm-field">
-        <label htmlFor={`${uid}-account`}>Account</label>
-        <select id={`${uid}-account`} value={account} onChange={(e) => onAccountChange(e.target.value)} required>
-          <option value="" disabled>
-            Choose an account…
-          </option>
-          {formOptions.accounts.map((acc) => (
-            <option key={acc} value={acc}>
-              {acc}
+      <div className="gm-form-grid gm-form-grid--three">
+        <div className="gm-field">
+          <label htmlFor={`${uid}-date`}>Date</label>
+          <input
+            id={`${uid}-date`}
+            type="date"
+            value={date}
+            onChange={(e) => onDateChange(e.target.value)}
+            required
+          />
+        </div>
+
+        <div className="gm-field">
+          <label htmlFor={`${uid}-account`}>Account</label>
+          <select id={`${uid}-account`} value={account} onChange={(e) => onAccountChange(e.target.value)} required>
+            <option value="" disabled>
+              Choose an account…
             </option>
-          ))}
-        </select>
-      </div>
+            {formOptions.accounts.map((acc) => (
+              <option key={acc} value={acc}>
+                {acc}
+              </option>
+            ))}
+          </select>
+        </div>
 
-      <div className="gm-field">
-        <label htmlFor={`${uid}-payee`}>Payee</label>
-        <input
-          id={`${uid}-payee`}
-          type="text"
-          value={payee}
-          onChange={(e) => onPayeeChange(e.target.value)}
-          required
-        />
-      </div>
-
-      <div className="gm-field">
-        <label htmlFor={`${uid}-amount`}>Amount</label>
-        <input
-          id={`${uid}-amount`}
-          type="number"
-          inputMode="decimal"
-          step="0.01"
-          min="0.01"
-          value={amountText}
-          onChange={(e) => onAmountChange(e.target.value)}
-          required
-        />
+        <div className="gm-field">
+          <label htmlFor={`${uid}-amount`}>Amount</label>
+          <input
+            id={`${uid}-amount`}
+            type="number"
+            inputMode="decimal"
+            step="0.01"
+            min="0.01"
+            value={amountText}
+            onChange={(e) => onAmountChange(e.target.value)}
+            required
+          />
+        </div>
       </div>
 
       <CategoryPicker
@@ -110,23 +112,36 @@ export function TransactionFields({
         <p className={`gm-preview gm-preview--${type === "Income" ? "income" : "expense"}`}>{preview}</p>
       )}
 
-      <div className="gm-field">
-        <label htmlFor={`${uid}-paymentMethod`}>Payment Method</label>
-        <select
-          id={`${uid}-paymentMethod`}
-          value={paymentMethod}
-          onChange={(e) => onPaymentMethodChange(e.target.value)}
-          required
-        >
-          <option value="" disabled>
-            Choose a payment method…
-          </option>
-          {formOptions.paymentMethods.map((method) => (
-            <option key={method} value={method}>
-              {method}
+      <div className="gm-form-grid gm-form-grid--two">
+        <div className="gm-field">
+          <label htmlFor={`${uid}-payee`}>Payee</label>
+          <input
+            id={`${uid}-payee`}
+            type="text"
+            value={payee}
+            onChange={(e) => onPayeeChange(e.target.value)}
+            required
+          />
+        </div>
+
+        <div className="gm-field">
+          <label htmlFor={`${uid}-paymentMethod`}>Payment Method</label>
+          <select
+            id={`${uid}-paymentMethod`}
+            value={paymentMethod}
+            onChange={(e) => onPaymentMethodChange(e.target.value)}
+            required
+          >
+            <option value="" disabled>
+              Choose a payment method…
             </option>
-          ))}
-        </select>
+            {formOptions.paymentMethods.map((method) => (
+              <option key={method} value={method}>
+                {method}
+              </option>
+            ))}
+          </select>
+        </div>
       </div>
 
       <div className="gm-field">

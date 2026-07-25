@@ -199,7 +199,7 @@ export function BillCalendar({ items }: Props) {
                     <span
                       key={`${occ.scheduleId}-${index}`}
                       className="gm-calendar-dot"
-                      style={{ background: occ.amount < 0 ? "var(--gm-negative)" : "var(--gm-positive)" }}
+                      style={{ background: occ.amount < 0 ? "var(--negative)" : "var(--positive)" }}
                     />
                   ))}
                   {extraCount > 0 && <span className="gm-calendar-day__more">+{extraCount}</span>}
