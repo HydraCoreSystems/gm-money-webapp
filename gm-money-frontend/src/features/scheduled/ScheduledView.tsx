@@ -144,6 +144,10 @@ export function ScheduledView({ formOptions, onAuthFailure }: Props) {
                       {!item.active ? " · Inactive" : ""}
                       {!item.autoCreate ? " · Manual Only" : ""}
                     </div>
+                    <div className="gm-schedule-progress">
+                      <span>{item.occurrenceLimit === null ? "Runs until stopped" : item.completed ? "Completed" : `${item.remainingOccurrences} of ${item.occurrenceLimit} remaining`}</span>
+                      {item.occurrenceLimit !== null && <div className="gm-progress-track"><i style={{ width: `${Math.min(100, (item.occurrencesGenerated / item.occurrenceLimit) * 100)}%` }} /></div>}
+                    </div>
                   </div>
                   <div className="gm-register-row__amounts">
                     <div className={item.amount < 0 ? "gm-register-row__amount--negative" : "gm-register-row__amount--positive"}>

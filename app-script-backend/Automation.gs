@@ -164,6 +164,7 @@ function processDueScheduledTransactionsForSpreadsheet_(ss) {
   ]);
 
   const existingOccurrences = new Set();
+  const occurrenceCounts = {};
 
   for (
     let rowIndex = 1;
@@ -186,6 +187,7 @@ function processDueScheduledTransactionsForSpreadsheet_(ss) {
       existingOccurrences.add(
         scheduleId + "|" + dueKey
       );
+      occurrenceCounts[scheduleId] = (occurrenceCounts[scheduleId] || 0) + 1;
     }
   }
 
@@ -213,10 +215,21 @@ function processDueScheduledTransactionsForSpreadsheet_(ss) {
     let dueDate = automationStartOfDay_(
       row[scheduleMap["Next Due"]]
     );
+    const currentScheduleId = String(row[scheduleMap["Schedule ID"]] || "").trim();
+    const rawLimit = row[scheduleMap["Occurrence Limit"]];
+    const occurrenceLimit = rawLimit === "" ? null : Number(rawLimit);
+    let occurrencesGenerated = Math.max(Number(row[scheduleMap["Occurrences Generated"]] || 0), occurrenceCounts[currentScheduleId] || 0);
+
+    if (occurrenceLimit !== null && occurrencesGenerated >= occurrenceLimit) {
+      scheduleSheet.getRange(rowIndex + 1, scheduleMap.Active + 1).setValue("No");
+      scheduleSheet.getRange(rowIndex + 1, scheduleMap["Occurrences Generated"] + 1).setValue(occurrencesGenerated);
+      if (!row[scheduleMap["Completed At"]]) scheduleSheet.getRange(rowIndex + 1, scheduleMap["Completed At"] + 1).setValue(new Date());
+      continue;
+    }
 
     let safety = 0;
 
-    while (dueDate <= today && safety < 24) {
+    while (dueDate <= today && safety < 24 && (occurrenceLimit === null || occurrencesGenerated < occurrenceLimit)) {
       const scheduleId = String(
         row[scheduleMap["Schedule ID"]] || ""
       ).trim();
@@ -300,6 +313,8 @@ function processDueScheduledTransactionsForSpreadsheet_(ss) {
 
         rowsToAppend.push(outputRow);
         existingOccurrences.add(occurrenceKey);
+        occurrencesGenerated++;
+        occurrenceCounts[scheduleId] = occurrencesGenerated;
       }
 
       scheduleSheet
@@ -317,12 +332,14 @@ function processDueScheduledTransactionsForSpreadsheet_(ss) {
       safety++;
     }
 
-    scheduleSheet
-      .getRange(
-        rowIndex + 1,
-        scheduleMap["Next Due"] + 1
-      )
-      .setValue(dueDate);
+    scheduleSheet.getRange(rowIndex + 1, scheduleMap["Occurrences Generated"] + 1).setValue(occurrencesGenerated);
+
+    if (occurrenceLimit !== null && occurrencesGenerated >= occurrenceLimit) {
+      scheduleSheet.getRange(rowIndex + 1, scheduleMap.Active + 1).setValue("No");
+      scheduleSheet.getRange(rowIndex + 1, scheduleMap["Completed At"] + 1).setValue(new Date());
+    } else {
+      scheduleSheet.getRange(rowIndex + 1, scheduleMap["Next Due"] + 1).setValue(dueDate);
+    }
   }
 
   if (rowsToAppend.length > 0) {
@@ -356,7 +373,10 @@ function ensureAutomationRecurringHeaders_(sheet) {
     "Updated By",
     "Updated At",
     "Last Generated Due",
-    "Payment Method"
+    "Payment Method",
+    "Occurrence Limit",
+    "Occurrences Generated",
+    "Completed At"
   ];
 
   ensureAutomationHeaders_(

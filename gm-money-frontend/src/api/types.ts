@@ -202,6 +202,10 @@ export type ScheduledTransaction = {
   active: boolean;
   autoCreate: boolean;
   notes: string;
+  occurrenceLimit: number | null;
+  occurrencesGenerated: number;
+  remainingOccurrences: number | null;
+  completed: boolean;
 };
 
 export type ScheduledTransactionPayload = {
@@ -216,6 +220,7 @@ export type ScheduledTransactionPayload = {
   active: boolean;
   autoCreate: boolean;
   notes: string;
+  occurrenceLimit: number | null;
 };
 
 export type UpdateScheduledTransactionPayload = ScheduledTransactionPayload & {

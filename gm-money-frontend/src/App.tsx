@@ -1,5 +1,5 @@
 import { useState } from "react";
-import { clearStoredPassword, getStoredPassword, storeEnteredBy, storePassword } from "./api/client";
+import { clearStoredPassword, getStoredEnteredBy, getStoredPassword, storeEnteredBy, storePassword } from "./api/client";
 import { PasswordGate } from "./auth/PasswordGate";
 import { TransactionEntryForm } from "./features/transaction-entry/TransactionEntryForm";
 import { RegisterView } from "./features/register/RegisterView";
@@ -11,6 +11,16 @@ import { MerchantMemoryView } from "./features/merchant-memory/MerchantMemoryVie
 import { useFormOptions } from "./hooks/useFormOptions";
 
 type Screen = "dashboard" | "entry" | "register" | "review" | "scheduled" | "merchants" | "settings";
+
+const NAV: { id: Screen; label: string; icon: string; description: string }[] = [
+  { id: "dashboard", label: "Overview", icon: "⌂", description: "Cash position and financial outlook" },
+  { id: "entry", label: "New transaction", icon: "+", description: "Record income or an expense" },
+  { id: "register", label: "Register", icon: "≡", description: "Your complete financial ledger" },
+  { id: "review", label: "Review", icon: "✓", description: "Categorize and approve bank activity" },
+  { id: "scheduled", label: "Scheduled", icon: "◷", description: "Upcoming and recurring transactions" },
+  { id: "merchants", label: "Merchant memory", icon: "✦", description: "Learned categorization rules" },
+  { id: "settings", label: "Settings", icon: "⚙", description: "Categories, budgets, and notifications" },
+];
 
 function App() {
   const [authed, setAuthed] = useState(!!getStoredPassword());
@@ -28,101 +38,59 @@ function App() {
   }
 
   const { status, options, error } = useFormOptions(authed, handleAuthFailure);
+  const current = NAV.find((item) => item.id === screen) ?? NAV[0];
+  const userName = getStoredEnteredBy() || "Gathering Moss";
+
+  if (!authed) return <PasswordGate onSubmit={handlePasswordSubmit} />;
 
   return (
-    <div className="gm-app">
-      <div className="gm-header-bar">GM Money</div>
-
-      {authed && status === "ready" && options && (
-        <div className="gm-nav-tabs">
-          <button
-            className={screen === "dashboard" ? "gm-nav-tab gm-nav-tab--active" : "gm-nav-tab"}
-            onClick={() => setScreen("dashboard")}
-          >
-            Dashboard
-          </button>
-          <button
-            className={screen === "entry" ? "gm-nav-tab gm-nav-tab--active" : "gm-nav-tab"}
-            onClick={() => setScreen("entry")}
-          >
-            Entry
-          </button>
-          <button
-            className={screen === "register" ? "gm-nav-tab gm-nav-tab--active" : "gm-nav-tab"}
-            onClick={() => setScreen("register")}
-          >
-            Register
-          </button>
-          <button
-            className={screen === "review" ? "gm-nav-tab gm-nav-tab--active" : "gm-nav-tab"}
-            onClick={() => setScreen("review")}
-          >
-            Review
-          </button>
-          <button
-            className={screen === "scheduled" ? "gm-nav-tab gm-nav-tab--active" : "gm-nav-tab"}
-            onClick={() => setScreen("scheduled")}
-          >
-            Scheduled
-          </button>
-          <button
-            className={screen === "merchants" ? "gm-nav-tab gm-nav-tab--active" : "gm-nav-tab"}
-            onClick={() => setScreen("merchants")}
-          >
-            Merchants
-          </button>
-          <button
-            className={screen === "settings" ? "gm-nav-tab gm-nav-tab--active" : "gm-nav-tab"}
-            onClick={() => setScreen("settings")}
-          >
-            Settings
-          </button>
+    <div className="gm-app-shell">
+      <aside className="gm-sidebar">
+        <div className="gm-brand-lockup">
+          <div className="gm-brand-mark">GM</div>
+          <div><strong>GM Money</strong><span>Financial center</span></div>
         </div>
-      )}
 
-      <div className="gm-main">
-        {!authed && <PasswordGate onSubmit={handlePasswordSubmit} />}
+        <nav className="gm-side-nav" aria-label="Primary navigation">
+          {NAV.map((item) => (
+            <button key={item.id} className={screen === item.id ? "gm-side-nav__item is-active" : "gm-side-nav__item"} onClick={() => setScreen(item.id)}>
+              <span aria-hidden="true">{item.icon}</span><b>{item.label}</b>
+            </button>
+          ))}
+        </nav>
 
-        {authed && status === "loading" && (
-          <div className="gm-card">
-            <p>Loading…</p>
-          </div>
-        )}
+        <div className="gm-sidebar-insight">
+          <span>FINANCIAL GUIDANCE</span>
+          <strong>Your books are connected</strong>
+          <p>Bank activity, manual entries, schedules, and merchant learning work together.</p>
+          <div><i /></div>
+          <small>GM Money foundation ready</small>
+        </div>
 
-        {authed && status === "error" && (
-          <div className="gm-card">
-            <p className="gm-error">{error || "Could not load the app."}</p>
-          </div>
-        )}
+        <div className="gm-user-chip">
+          <div>{userName.slice(0, 1).toUpperCase()}</div>
+          <span><strong>{userName}</strong><small>Gathering Moss workspace</small></span>
+        </div>
+      </aside>
 
-        {authed && status === "ready" && options && screen === "dashboard" && (
-          <DashboardView onAuthFailure={handleAuthFailure} />
-        )}
+      <main className="gm-workspace">
+        <header className="gm-workspace-header">
+          <div><p>Gathering Moss / GM Money</p><h1>{current.label}</h1><span>{current.description}</span></div>
+          <button className="gm-header-action" onClick={() => setScreen("entry")}>+ Add transaction</button>
+        </header>
 
-        {authed && status === "ready" && options && screen === "entry" && (
-          <TransactionEntryForm formOptions={options} onAuthFailure={handleAuthFailure} />
-        )}
-
-        {authed && status === "ready" && options && screen === "register" && (
-          <RegisterView formOptions={options} onAuthFailure={handleAuthFailure} />
-        )}
-
-        {authed && status === "ready" && options && screen === "review" && (
-          <ReviewView formOptions={options} onAuthFailure={handleAuthFailure} />
-        )}
-
-        {authed && status === "ready" && options && screen === "scheduled" && (
-          <ScheduledView formOptions={options} onAuthFailure={handleAuthFailure} />
-        )}
-
-        {authed && status === "ready" && options && screen === "merchants" && (
-          <MerchantMemoryView formOptions={options} onAuthFailure={handleAuthFailure} />
-        )}
-
-        {authed && status === "ready" && options && screen === "settings" && (
-          <SettingsView onAuthFailure={handleAuthFailure} />
-        )}
-      </div>
+        <section className="gm-content">
+          {status === "loading" && <div className="gm-card"><p>Loading your financial center…</p></div>}
+          {status === "error" && <div className="gm-card"><p className="gm-error">{error || "Could not load the app."}</p></div>}
+          {status === "ready" && options && screen === "dashboard" && <DashboardView onAuthFailure={handleAuthFailure} />}
+          {status === "ready" && options && screen === "entry" && <TransactionEntryForm formOptions={options} onAuthFailure={handleAuthFailure} />}
+          {status === "ready" && options && screen === "register" && <RegisterView formOptions={options} onAuthFailure={handleAuthFailure} />}
+          {status === "ready" && options && screen === "review" && <ReviewView formOptions={options} onAuthFailure={handleAuthFailure} />}
+          {status === "ready" && options && screen === "scheduled" && <ScheduledView formOptions={options} onAuthFailure={handleAuthFailure} />}
+          {status === "ready" && options && screen === "merchants" && <MerchantMemoryView formOptions={options} onAuthFailure={handleAuthFailure} />}
+          {status === "ready" && options && screen === "settings" && <SettingsView onAuthFailure={handleAuthFailure} />}
+        </section>
+      </main>
     </div>
   );
 }

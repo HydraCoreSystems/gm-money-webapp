@@ -42,6 +42,8 @@ export function ScheduledTransactionForm({ formOptions, existing, onAuthFailure,
   const [active, setActive] = useState(existing?.active ?? true);
   const [autoCreate, setAutoCreate] = useState(existing?.autoCreate ?? true);
   const [notes, setNotes] = useState(existing?.notes ?? "");
+  const [runMode, setRunMode] = useState<"unlimited" | "limited">(existing?.occurrenceLimit ? "limited" : "unlimited");
+  const [occurrenceLimit, setOccurrenceLimit] = useState(existing?.occurrenceLimit ? String(existing.occurrenceLimit) : "");
 
   const [status, setStatus] = useState<"idle" | "submitting">("idle");
   const [error, setError] = useState("");
@@ -66,6 +68,7 @@ export function ScheduledTransactionForm({ formOptions, existing, onAuthFailure,
       active,
       autoCreate,
       notes,
+      occurrenceLimit: runMode === "limited" ? Number(occurrenceLimit) : null,
     };
 
     const result = existing
@@ -187,6 +190,21 @@ export function ScheduledTransactionForm({ formOptions, existing, onAuthFailure,
             required
           />
         </div>
+
+        <fieldset className="gm-schedule-runs">
+          <legend>How long should this run?</legend>
+          <div className="gm-segmented-control">
+            <button type="button" className={runMode === "unlimited" ? "is-active" : ""} onClick={() => setRunMode("unlimited")}>Until I stop it</button>
+            <button type="button" className={runMode === "limited" ? "is-active" : ""} onClick={() => setRunMode("limited")}>A set number of times</button>
+          </div>
+          {runMode === "limited" && (
+            <div className="gm-field gm-field--inline">
+              <label htmlFor={`${uid}-occurrence-limit`}>Total transactions</label>
+              <input id={`${uid}-occurrence-limit`} type="number" min={Math.max(1, (existing?.occurrencesGenerated ?? 0) + 1)} step="1" value={occurrenceLimit} onChange={(e) => setOccurrenceLimit(e.target.value)} required />
+              {existing && existing.occurrencesGenerated > 0 && <small>{existing.occurrencesGenerated} already completed</small>}
+            </div>
+          )}
+        </fieldset>
 
         <div className="gm-who-picker">
           <button
