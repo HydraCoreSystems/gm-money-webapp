@@ -6,6 +6,12 @@
       "runtimeExecutable": "C:\\Users\\pwach\\OneDrive\\Desktop\\gm-money-webapp\\gm-money-frontend\\dev.cmd",
       "runtimeArgs": [],
       "port": 5173
+    },
+    {
+      "name": "gm-money-web",
+      "runtimeExecutable": "C:\\Users\\pwach\\OneDrive\\Desktop\\gm-money-webapp\\gm-money-web\\dev.cmd",
+      "runtimeArgs": [],
+      "port": 3000
     }
   ]
 }
