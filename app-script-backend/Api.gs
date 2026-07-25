@@ -1632,7 +1632,11 @@ function apiGetScheduledTransactions_() {
         : String(nextDue || ""),
       active: String(row[map.Active] || "").trim() === "Yes",
       autoCreate: String(row[map["Auto Create"]] || "").trim() === "Yes",
-      notes: String(row[map.Notes] || "")
+      notes: String(row[map.Notes] || ""),
+      occurrenceLimit: row[map["Occurrence Limit"]] === "" ? null : Number(row[map["Occurrence Limit"]]),
+      occurrencesGenerated: Number(row[map["Occurrences Generated"]] || 0),
+      remainingOccurrences: row[map["Occurrence Limit"]] === "" ? null : Math.max(0, Number(row[map["Occurrence Limit"]]) - Number(row[map["Occurrences Generated"]] || 0)),
+      completed: String(row[map.Active] || "").trim() !== "Yes" && row[map["Occurrence Limit"]] !== "" && Number(row[map["Occurrences Generated"]] || 0) >= Number(row[map["Occurrence Limit"]])
     };
   });
 }
@@ -1696,6 +1700,10 @@ function buildScheduledTransactionValues_(payload) {
   const active = payload.active === false ? "No" : "Yes";
   const autoCreate = payload.autoCreate === true ? "Yes" : "No";
   const notes = String(payload.notes || "").trim().slice(0, 1000);
+  const occurrenceLimit = payload.occurrenceLimit === null || payload.occurrenceLimit === undefined || payload.occurrenceLimit === "" ? null : Number(payload.occurrenceLimit);
+  if (occurrenceLimit !== null && (!Number.isInteger(occurrenceLimit) || occurrenceLimit < 1)) {
+    errors.push("Enter a whole-number run count of at least 1, or choose unlimited.");
+  }
 
   if (errors.length > 0) {
     return { errors: errors };
@@ -1717,7 +1725,8 @@ function buildScheduledTransactionValues_(payload) {
       nextDue: nextDue,
       active: active,
       autoCreate: autoCreate,
-      notes: notes
+      notes: notes,
+      occurrenceLimit: occurrenceLimit
     }
   };
 }
@@ -1757,6 +1766,9 @@ function apiCreateScheduledTransaction_(payload) {
     row[map.Active] = values.active;
     row[map["Auto Create"]] = values.autoCreate;
     row[map.Notes] = values.notes;
+    row[map["Occurrence Limit"]] = values.occurrenceLimit === null ? "" : values.occurrenceLimit;
+    row[map["Occurrences Generated"]] = 0;
+    row[map["Completed At"]] = "";
     row[map["Updated By"]] = "Web App";
     row[map["Updated At"]] = new Date();
 
@@ -1811,7 +1823,13 @@ function apiUpdateScheduledTransaction_(payload) {
     existing[map["Next Due"]] = values.nextDue;
     existing[map.Active] = values.active;
     existing[map["Auto Create"]] = values.autoCreate;
+    const alreadyGenerated = Number(existing[map["Occurrences Generated"]] || 0);
+    if (values.occurrenceLimit !== null && values.occurrenceLimit < alreadyGenerated) {
+      return { ok: false, code: "VALIDATION_ERROR", error: "The total run count cannot be less than the number already completed." };
+    }
     existing[map.Notes] = values.notes;
+    existing[map["Occurrence Limit"]] = values.occurrenceLimit === null ? "" : values.occurrenceLimit;
+    if (values.occurrenceLimit === null || alreadyGenerated < values.occurrenceLimit) existing[map["Completed At"]] = "";
     existing[map["Updated By"]] = "Web App";
     existing[map["Updated At"]] = new Date();
 
