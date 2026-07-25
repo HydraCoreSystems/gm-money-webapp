@@ -154,8 +154,23 @@ gm-money-web/   Next.js 14 (App Router) + React 18 + TypeScript
   schema. Nothing built so far in `gm-money-web` had to be thrown away —
   only the login/auth code existed, and it's schema-agnostic (just needed
   one additive `site_auth` table + a `GRANT`, both applied).
-- Not yet built: any real screen (Dashboard/Register/Entry/etc.) reading
-  the actual business data — the home page is still a placeholder.
+- **Dashboard, Register, and Entry are now real and verified working**
+  against live data (not placeholders): Dashboard shows correct account
+  balances/income/expenses/pending-review/uncleared counts; Register
+  computes a mathematically verified running balance with real dedup
+  between manual and bank-fed duplicate rows; Entry has a working nested
+  category picker and successfully inserts real transactions (verified
+  via a real insert-then-delete test, then cleaned up). Still missing:
+  Review (bank-transaction categorization queue), Settings, Scheduled,
+  Merchant Memory, Budgets, notifications, the Tiller sync mechanism
+  (still relies on the schema's existing data, nothing keeps it fresh
+  yet), and cron jobs.
+- **Two real bugs hit and fixed while building these**: (1) PostgREST
+  silently caps any request at 1000 rows regardless of `.range()` — a
+  naive full-history fetch for Register's balance math was silently
+  wrong until this was caught and fixed with proper pagination. (2) The
+  `transactions.review_status` check constraint doesn't accept the value
+  `'reviewed'` — real valid values are `'unreviewed'`/`'approved'`.
 
 ---
 
