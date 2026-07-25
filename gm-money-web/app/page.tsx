@@ -24,7 +24,7 @@ export default async function HomePage() {
 
   return (
     <div className="gm-shell">
-      <Sidebar />
+      <Sidebar active="/" />
 
       <div className="gm-workspace">
         <header className="gm-topbar">
