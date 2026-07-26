@@ -98,7 +98,14 @@ export async function matchToBank(formData: FormData): Promise<MatchTransactionR
     business_id: businessId,
     manual_transaction_id: manualId,
     bank_transaction_id: bankId,
-    match_method: "manual_confirm",
+    // "manual_confirm" seemed like the obvious value but the pre-existing
+    // check constraint on this column (from the originally-adopted
+    // schema) rejects it -- confirmed empirically that "manual" is
+    // accepted, since the constraint's actual allowed list isn't exposed
+    // anywhere queryable (PostgREST doesn't surface check constraint
+    // definitions, and the table had no surviving rows left to infer
+    // from).
+    match_method: "manual",
     confidence: 100,
     matched_at: new Date().toISOString(),
   });
