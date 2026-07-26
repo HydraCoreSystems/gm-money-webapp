@@ -22,5 +22,11 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|login|setup|api/health|api/tiller-sync|api/cron).*)"],
+  // icon/apple-icon/manifest.webmanifest are Next's generated PWA assets
+  // (app/icon.tsx, app/apple-icon.tsx, app/manifest.ts) -- browsers and
+  // iOS's "Add to Home Screen" fetch these without a session cookie, so
+  // they need to stay reachable the same way favicon.ico already is.
+  matcher: [
+    "/((?!_next/static|_next/image|favicon.ico|icon|apple-icon|manifest.webmanifest|login|setup|api/health|api/tiller-sync|api/cron).*)",
+  ],
 };

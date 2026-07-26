@@ -169,6 +169,61 @@ h3 {
 }
 
 /* ============================================================
+   Lite (mobile home-screen) view -- no Sidebar, just balances + Entry.
+============================================================ */
+
+.gm-lite {
+  max-width: 520px;
+  margin: 0 auto;
+  padding: 18px 16px 40px;
+  display: flex;
+  flex-direction: column;
+  gap: 18px;
+}
+
+.gm-lite__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.gm-lite__header-actions {
+  display: flex;
+  align-items: center;
+  gap: 14px;
+}
+
+.gm-lite__balances {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(140px, 1fr));
+  gap: 10px;
+}
+
+.gm-lite__balance-tile {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 14px;
+  padding: 14px 16px;
+}
+
+.gm-lite__balance-label {
+  font-size: 0.75rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+  color: var(--muted);
+  margin-bottom: 4px;
+}
+
+.gm-lite__balance-value {
+  font-size: 1.5rem;
+  font-weight: 700;
+  color: var(--ink);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ============================================================
    Shell + Sidebar
 ============================================================ */
 

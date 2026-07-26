@@ -1,4 +1,4 @@
-import type { Metadata } from "next";
+import type { Metadata, Viewport } from "next";
 import Script from "next/script";
 import { Inter } from "next/font/google";
 import "./globals.css";
@@ -11,6 +11,22 @@ const inter = Inter({ subsets: ["latin"], weight: ["400", "500", "600"] });
 
 export const metadata: Metadata = {
   title: "GM Money",
+  manifest: "/manifest.webmanifest",
+  // iOS Safari's "Add to Home Screen" reads these meta tags (generated
+  // automatically from this config), not manifest.json, to decide
+  // whether the launched icon opens full-screen ("capable"), what the
+  // status bar looks like, and what title to show under the icon.
+  appleWebApp: {
+    capable: true,
+    statusBarStyle: "black-translucent",
+    title: "GM Money",
+  },
+};
+
+export const viewport: Viewport = {
+  width: "device-width",
+  initialScale: 1,
+  themeColor: "#244d3a",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {
