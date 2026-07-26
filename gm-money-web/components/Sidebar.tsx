@@ -8,6 +8,10 @@ const NAV_ITEMS: { href: string; label: string; icon: string }[] = [
   { href: "/", label: "Dashboard", icon: "●" },
   { href: "/register", label: "Register", icon: "☰" },
   { href: "/entry", label: "Entry", icon: "✚" },
+  { href: "/review", label: "Review", icon: "✓" },
+  { href: "/scheduled", label: "Scheduled", icon: "▦" },
+  { href: "/merchants", label: "Merchants", icon: "♖" },
+  { href: "/settings", label: "Settings", icon: "⚙" },
 ];
 
 export function Sidebar({ active }: { active: string }) {

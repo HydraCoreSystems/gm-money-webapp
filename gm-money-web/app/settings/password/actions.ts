@@ -1,8 +1,8 @@
 "use server";
 
 import { redirect } from "next/navigation";
-import bcrypt from "bcryptjs";
-import { getPasswordHash, setPasswordHash } from "@/lib/site-auth-db";
+import { requireAuthenticatedUser } from "@/lib/auth-session";
+import { updateAppUserPassword } from "@/lib/app-users";
 
 export async function changePassword(formData: FormData) {
   const current = String(formData.get("current_password") || "");
@@ -16,13 +16,19 @@ export async function changePassword(formData: FormData) {
     redirect("/settings/password?error=" + encodeURIComponent("New password and confirmation don't match."));
   }
 
-  const hash = await getPasswordHash();
-  if (!hash || !(await bcrypt.compare(current, hash))) {
-    redirect("/settings/password?error=" + encodeURIComponent("Current password is incorrect."));
+  try {
+    const claims = await requireAuthenticatedUser();
+    await updateAppUserPassword({
+      userId: claims.userId!,
+      currentPassword: current,
+      newPassword: next,
+    });
+  } catch (error) {
+    redirect(
+      "/settings/password?error=" +
+        encodeURIComponent(error instanceof Error ? error.message : "Could not update password."),
+    );
   }
-
-  const newHash = await bcrypt.hash(next, 10);
-  await setPasswordHash(newHash);
 
   redirect("/settings/password?success=" + encodeURIComponent("Password updated."));
 }

@@ -24,11 +24,23 @@ export function EntryForm({
   const [selection, setSelection] = useState<Selection | null>(null);
   const [status, setStatus] = useState<"idle" | "success">("idle");
   const [error, setError] = useState("");
+  const [notice, setNotice] = useState("");
+  const [createRecurring, setCreateRecurring] = useState(false);
+  const [recurringFrequency, setRecurringFrequency] = useState("Monthly");
+  const [recurringNextDue, setRecurringNextDue] = useState(todayLocalDate());
+  const [recurringLimit, setRecurringLimit] = useState("");
+  const [recurringAutoCreate, setRecurringAutoCreate] = useState(true);
   const [isPending, startTransition] = useTransition();
 
   async function handleSubmit(formData: FormData) {
     setError("");
+    setNotice("");
     setStatus("idle");
+    formData.set("createRecurring", createRecurring ? "true" : "false");
+    formData.set("recurringFrequency", recurringFrequency);
+    formData.set("recurringNextDue", recurringNextDue);
+    formData.set("recurringLimit", recurringLimit);
+    formData.set("recurringAutoCreate", recurringAutoCreate ? "true" : "false");
     const result = await createTransaction(formData);
     if (!result.ok) {
       setError(result.error);
@@ -36,6 +48,18 @@ export function EntryForm({
     }
     setStatus("success");
     setSelection(null);
+    if (createRecurring) {
+      if (result.recurringCreated) {
+        setNotice("Recurring schedule was also created.");
+      } else if (result.recurringError) {
+        setNotice(`Transaction saved, but recurring setup failed: ${result.recurringError}`);
+      }
+      setCreateRecurring(false);
+      setRecurringLimit("");
+      setRecurringAutoCreate(true);
+      setRecurringFrequency("Monthly");
+      setRecurringNextDue(todayLocalDate());
+    }
   }
 
   return (
@@ -57,6 +81,7 @@ export function EntryForm({
       <div style={{ padding: "0 30px 30px" }}>
         {error && <p className="gm-error">{error}</p>}
         {status === "success" && <p className="gm-success">Saved.</p>}
+        {notice && <p className="gm-register-note" style={{ marginTop: 0 }}>{notice}</p>}
 
         <div className="gm-form-grid gm-form-grid--three">
           <div className="gm-field">
@@ -88,6 +113,7 @@ export function EntryForm({
           onChange={setSelection}
           categoryFieldName="categoryId"
           subcategoryFieldName="subcategoryId"
+          allowCreate
         />
         <p className="gm-category-picker__hint" style={{ marginTop: -12, marginBottom: 16 }}>
           Amount's sign must match the category (negative for Expense, positive for Income).
@@ -114,6 +140,57 @@ export function EntryForm({
             Notes <span style={{ textTransform: "none", fontWeight: 500, color: "var(--faint)" }}>(optional)</span>
           </label>
           <textarea id="notes" name="notes" rows={2} />
+        </div>
+
+        <div className="gm-card" style={{ marginTop: 10, padding: "12px 14px", border: "1px solid var(--line)" }}>
+          <div className="gm-who-picker" style={{ marginTop: 0 }}>
+            <button
+              type="button"
+              className={createRecurring ? "gm-who-picker__selected" : ""}
+              onClick={() => setCreateRecurring((prev) => !prev)}
+            >
+              {createRecurring ? "Also make recurring ✓" : "Make this recurring"}
+            </button>
+            <button
+              type="button"
+              className={recurringAutoCreate ? "gm-who-picker__selected" : ""}
+              onClick={() => setRecurringAutoCreate((prev) => !prev)}
+              disabled={!createRecurring}
+            >
+              {recurringAutoCreate ? "Auto post ✓" : "Manual schedule"}
+            </button>
+          </div>
+
+          {createRecurring && (
+            <div className="gm-form-grid gm-form-grid--three" style={{ marginTop: 10 }}>
+              <div className="gm-field">
+                <label>Recurring frequency</label>
+                <select value={recurringFrequency} onChange={(e) => setRecurringFrequency(e.target.value)}>
+                  <option>Daily</option>
+                  <option>Weekly</option>
+                  <option>Every 2 Weeks</option>
+                  <option>Monthly</option>
+                  <option>Quarterly</option>
+                  <option>Yearly</option>
+                </select>
+              </div>
+              <div className="gm-field">
+                <label>First due date</label>
+                <input type="date" value={recurringNextDue} onChange={(e) => setRecurringNextDue(e.target.value)} />
+              </div>
+              <div className="gm-field">
+                <label>Number of payments</label>
+                <input
+                  type="number"
+                  min="1"
+                  step="1"
+                  value={recurringLimit}
+                  onChange={(e) => setRecurringLimit(e.target.value)}
+                  placeholder="Blank = ongoing"
+                />
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="gm-panel-foot">

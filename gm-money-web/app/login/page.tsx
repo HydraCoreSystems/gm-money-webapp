@@ -1,9 +1,11 @@
 import { login } from "./actions";
-import { WhoPicker } from "./WhoPicker";
+import { getAppUserCount } from "@/lib/app-users";
 
 export const dynamic = "force-dynamic";
 
-export default function LoginPage({ searchParams }: { searchParams: { error?: string } }) {
+export default async function LoginPage({ searchParams }: { searchParams: { error?: string } }) {
+  const userCount = await getAppUserCount();
+
   return (
     <div className="gm-standalone">
       <div className="gm-card">
@@ -17,11 +19,20 @@ export default function LoginPage({ searchParams }: { searchParams: { error?: st
 
         {searchParams.error && <p className="gm-error">{searchParams.error}</p>}
 
+        {userCount === 0 && (
+          <p className="gm-register-note" style={{ marginTop: 0 }}>
+            No users are configured yet. <a href="/setup">Run first-time setup</a>.
+          </p>
+        )}
+
         <form action={login}>
-          <WhoPicker />
+          <div className="gm-field">
+            <label htmlFor="email">Email</label>
+            <input id="email" type="email" name="email" required autoFocus />
+          </div>
           <div className="gm-field">
             <label htmlFor="password">Password</label>
-            <input id="password" type="password" name="password" required autoFocus />
+            <input id="password" type="password" name="password" required />
           </div>
           <button className="gm-button" type="submit">
             Continue

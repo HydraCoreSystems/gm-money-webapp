@@ -1,0 +1,16 @@
+{
+	"version": "2.0.0",
+	"tasks": [
+		{
+			"label": "deploy-vercel-prod",
+			"type": "shell",
+			"command": "vercel",
+			"args": [
+				"--prod",
+				"--yes"
+			],
+			"isBackground": false,
+			"group": "build"
+		}
+	]
+}

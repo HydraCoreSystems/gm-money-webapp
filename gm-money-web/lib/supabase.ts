@@ -1,4 +1,5 @@
 import { createClient } from "@supabase/supabase-js";
+import { requireEnv } from "./env";
 
 // Scoped to the gm_money schema (not `public`) so this app's tables can
 // share a Supabase project with another app (HydraCloud) without any name
@@ -9,14 +10,19 @@ import { createClient } from "@supabase/supabase-js";
 // and populated by a prior ChatGPT session before this one started (see
 // HANDOFF.md's "MAJOR PIVOT" note). Adopted as-is rather than replaced.
 export function getSupabaseServerClient() {
-  const url = process.env.SUPABASE_URL;
-  const serviceRoleKey = process.env.SUPABASE_SERVICE_ROLE_KEY;
-
-  if (!url || !serviceRoleKey) {
-    throw new Error("SUPABASE_URL and SUPABASE_SERVICE_ROLE_KEY must be set");
-  }
+  const url = requireEnv("SUPABASE_URL");
+  const serviceRoleKey = requireEnv("SUPABASE_SERVICE_ROLE_KEY");
 
   return createClient(url, serviceRoleKey, { db: { schema: "gm_money" } });
+}
+
+// A server client that targets the public schema. Use this for small
+// compatibility queries that must hit public views (e.g. a proxy view).
+export function getSupabaseServerClientPublic() {
+  const url = requireEnv("SUPABASE_URL");
+  const serviceRoleKey = requireEnv("SUPABASE_SERVICE_ROLE_KEY");
+
+  return createClient(url, serviceRoleKey);
 }
 
 // The one business row this schema currently holds. The schema is

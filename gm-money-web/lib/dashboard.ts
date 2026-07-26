@@ -1,4 +1,5 @@
 import { getSupabaseServerClient, getBusinessId } from "./supabase";
+import { processDueScheduledTransactions } from "./scheduled";
 
 // Per the owner's explicit instruction: nothing before this date should
 // be considered "current" activity (2+ years of pre-existing history was
@@ -6,10 +7,22 @@ import { getSupabaseServerClient, getBusinessId } from "./supabase";
 // NOT affect account balances (those are real point-in-time snapshots,
 // unaffected by which transactions we choose to display).
 const CUTOFF_DATE = "2026-07-01";
+const CHART_DAY_WINDOW = 30;
 
 function startOfMonth(): string {
   const now = new Date();
   return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+}
+
+function toDateKey(date: Date): string {
+  return `${date.getFullYear()}-${String(date.getMonth() + 1).padStart(2, "0")}-${String(date.getDate()).padStart(2, "0")}`;
+}
+
+function chartWindowStart(): string {
+  const now = new Date();
+  now.setDate(now.getDate() - (CHART_DAY_WINDOW - 1));
+  const key = toDateKey(now);
+  return key < CUTOFF_DATE ? CUTOFF_DATE : key;
 }
 
 export type DashboardData = {
@@ -27,9 +40,27 @@ export type DashboardData = {
     category: string | null;
     status: string;
   }[];
+  cashflowSeries: {
+    date: string;
+    income: number;
+    expense: number;
+    net: number;
+  }[];
+  spendingByCategory: {
+    category: string;
+    amount: number;
+  }[];
+  syncStatus: {
+    lastSyncAt: string | null;
+    status: "success" | "error" | "unknown";
+    processedCount: number | null;
+    message: string | null;
+  };
 };
 
 export async function getDashboardData(): Promise<DashboardData> {
+  await processDueScheduledTransactions();
+
   const supabase = getSupabaseServerClient();
   const businessId = await getBusinessId();
 
@@ -68,7 +99,7 @@ export async function getDashboardData(): Promise<DashboardData> {
   // violate, per CLAUDE.md.
   const { data: monthTx, error: monthTxError } = await supabase
     .from("transactions")
-    .select("amount, categories(category_type)")
+    .select("amount, transaction_date, categories(category_type, name)")
     .eq("business_id", businessId)
     .gte("transaction_date", startOfMonth());
   if (monthTxError) throw new Error(monthTxError.message);
@@ -76,10 +107,52 @@ export async function getDashboardData(): Promise<DashboardData> {
   let incomeThisMonth = 0;
   let expensesThisMonth = 0;
   for (const t of monthTx ?? []) {
-    const categoryType = (t.categories as unknown as { category_type: string } | null)?.category_type;
+    const category = t.categories as unknown as { category_type: string; name: string | null } | null;
+    const categoryType = category?.category_type;
     const amount = Math.abs(Number(t.amount));
     if (categoryType === "income") incomeThisMonth += amount;
     else if (categoryType === "expense") expensesThisMonth += amount;
+  }
+
+  const spendingByCategoryMap = new Map<string, number>();
+  for (const t of monthTx ?? []) {
+    const category = t.categories as unknown as { category_type: string; name: string | null } | null;
+    if (category?.category_type !== "expense") continue;
+    const key = category.name || "Uncategorized";
+    const amount = Math.abs(Number(t.amount));
+    spendingByCategoryMap.set(key, (spendingByCategoryMap.get(key) ?? 0) + amount);
+  }
+
+  const spendingByCategory = [...spendingByCategoryMap.entries()]
+    .map(([category, amount]) => ({ category, amount }))
+    .sort((a, b) => b.amount - a.amount)
+    .slice(0, 6);
+
+  const cashflowStart = chartWindowStart();
+  const { data: chartTx, error: chartTxError } = await supabase
+    .from("transactions")
+    .select("transaction_date, amount, categories(category_type)")
+    .eq("business_id", businessId)
+    .gte("transaction_date", cashflowStart)
+    .order("transaction_date", { ascending: true });
+  if (chartTxError) throw new Error(chartTxError.message);
+
+  const days: { date: string; income: number; expense: number; net: number }[] = [];
+  const start = new Date(cashflowStart + "T00:00:00");
+  const end = new Date();
+  for (let d = new Date(start); d <= end; d.setDate(d.getDate() + 1)) {
+    days.push({ date: toDateKey(d), income: 0, expense: 0, net: 0 });
+  }
+  const byDate = new Map(days.map((d) => [d.date, d]));
+
+  for (const tx of chartTx ?? []) {
+    const bucket = byDate.get(tx.transaction_date);
+    if (!bucket) continue;
+    const categoryType = (tx.categories as unknown as { category_type: string } | null)?.category_type;
+    const amount = Math.abs(Number(tx.amount));
+    if (categoryType === "income") bucket.income += amount;
+    else if (categoryType === "expense") bucket.expense += amount;
+    bucket.net = bucket.income - bucket.expense;
   }
 
   // "Pending review" = bank-fed transactions nobody has ever categorized
@@ -113,6 +186,55 @@ export async function getDashboardData(): Promise<DashboardData> {
     .limit(8);
   if (recentError) throw new Error(recentError.message);
 
+  let syncStatus: DashboardData["syncStatus"] = {
+    lastSyncAt: null,
+    status: "unknown",
+    processedCount: null,
+    message: null,
+  };
+
+  const syncEventRes = await supabase
+    .from("sync_events")
+    .select("received_at, status, processed_count, error_message")
+    .eq("business_id", businessId)
+    .eq("source", "tiller_sync")
+    .order("received_at", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+
+  if (syncEventRes.error) {
+    const errText = `${syncEventRes.error.code ?? ""} ${syncEventRes.error.message ?? ""}`.toLowerCase();
+    const syncEventsMissing = errText.includes("sync_events") && (errText.includes("42p01") || errText.includes("does not exist") || errText.includes("pgrst"));
+    if (!syncEventsMissing) throw new Error(syncEventRes.error.message);
+  } else if (syncEventRes.data) {
+    syncStatus = {
+      lastSyncAt: String(syncEventRes.data.received_at ?? "") || null,
+      status: syncEventRes.data.status === "success" ? "success" : syncEventRes.data.status === "error" ? "error" : "unknown",
+      processedCount: syncEventRes.data.processed_count == null ? null : Number(syncEventRes.data.processed_count),
+      message: syncEventRes.data.error_message == null ? null : String(syncEventRes.data.error_message),
+    };
+  }
+
+  if (!syncStatus.lastSyncAt) {
+    const txSyncRes = await supabase
+      .from("transactions")
+      .select("created_at")
+      .eq("business_id", businessId)
+      .eq("source", "tiller")
+      .order("created_at", { ascending: false })
+      .limit(1)
+      .maybeSingle();
+    if (txSyncRes.error) throw new Error(txSyncRes.error.message);
+    if (txSyncRes.data?.created_at) {
+      syncStatus = {
+        lastSyncAt: String(txSyncRes.data.created_at),
+        status: "unknown",
+        processedCount: null,
+        message: "Latest imported Tiller transaction timestamp.",
+      };
+    }
+  }
+
   return {
     accounts: resolvedAccounts,
     incomeThisMonth,
@@ -128,5 +250,8 @@ export async function getDashboardData(): Promise<DashboardData> {
       category: (t.categories as unknown as { name: string } | null)?.name ?? null,
       status: t.status,
     })),
+    cashflowSeries: days,
+    spendingByCategory,
+    syncStatus,
   };
 }

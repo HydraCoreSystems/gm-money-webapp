@@ -3,9 +3,10 @@ import { SESSION_COOKIE_NAME, verifySessionToken } from "@/lib/session";
 
 // Server-enforced session gate, ported from skrybix-webapp/middleware.ts.
 // Runs before every request (Vercel Edge Middleware) except /login,
-// /api/tiller-sync, and /api/cron/** -- those two API paths authenticate
-// with their own shared secrets instead (Apps Script and Vercel Cron have
-// no session cookie to send). Fails closed if AUTH_SECRET isn't configured.
+// /setup,
+// /api/health, /api/tiller-sync, and /api/cron/** -- those API paths
+// authenticate with shared secrets or need to be reachable for deployment
+// checks. Fails closed if AUTH_SECRET isn't configured.
 export async function middleware(request: NextRequest) {
   const secret = process.env.AUTH_SECRET;
   if (!secret) {
@@ -21,5 +22,5 @@ export async function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/((?!_next/static|_next/image|favicon.ico|login|api/tiller-sync|api/cron).*)"],
+  matcher: ["/((?!_next/static|_next/image|favicon.ico|login|setup|api/health|api/tiller-sync|api/cron).*)"],
 };

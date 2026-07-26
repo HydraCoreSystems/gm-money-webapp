@@ -2,23 +2,37 @@
 
 import { redirect } from "next/navigation";
 import { cookies } from "next/headers";
-import bcrypt from "bcryptjs";
-import { getPasswordHash } from "@/lib/site-auth-db";
 import { createSessionToken, ENTERED_BY_COOKIE_NAME, SESSION_COOKIE_NAME, SESSION_MAX_AGE_SECONDS } from "@/lib/session";
+import { requireEnv } from "@/lib/env";
+import { findActiveUserByEmail, getAppUserCount, touchAppUserLastLogin } from "@/lib/app-users";
+import bcrypt from "bcryptjs";
 
 export async function login(formData: FormData) {
+  const email = String(formData.get("email") || "").trim().toLowerCase();
   const password = String(formData.get("password") || "");
-  const enteredBy = String(formData.get("enteredBy") || "");
-  const hash = await getPasswordHash();
+  const userCount = await getAppUserCount();
 
-  if (!hash || !(await bcrypt.compare(password, hash))) {
-    redirect("/login?error=" + encodeURIComponent("Incorrect password."));
+  if (userCount === 0) {
+    redirect("/setup");
   }
 
-  const secret = process.env.AUTH_SECRET;
-  if (!secret) throw new Error("AUTH_SECRET is not configured");
+  if (!email || !password) {
+    redirect("/login?error=" + encodeURIComponent("Email and password are required."));
+  }
 
-  const token = await createSessionToken(secret);
+  const user = await findActiveUserByEmail(email);
+  if (!user || !(await bcrypt.compare(password, user.passwordHash))) {
+    redirect("/login?error=" + encodeURIComponent("Incorrect email or password."));
+  }
+
+  const secret = requireEnv("AUTH_SECRET");
+
+  const token = await createSessionToken(secret, {
+    userId: user.id,
+    email: user.email,
+    displayName: user.displayName,
+    role: user.role,
+  });
   const cookieStore = cookies();
   cookieStore.set(SESSION_COOKIE_NAME, token, {
     httpOnly: true,
@@ -28,15 +42,15 @@ export async function login(formData: FormData) {
     maxAge: SESSION_MAX_AGE_SECONDS,
   });
 
-  if (enteredBy) {
-    cookieStore.set(ENTERED_BY_COOKIE_NAME, enteredBy, {
-      httpOnly: false,
-      secure: true,
-      sameSite: "lax",
-      path: "/",
-      maxAge: SESSION_MAX_AGE_SECONDS,
-    });
-  }
+  cookieStore.set(ENTERED_BY_COOKIE_NAME, user.displayName || user.email, {
+    httpOnly: false,
+    secure: true,
+    sameSite: "lax",
+    path: "/",
+    maxAge: SESSION_MAX_AGE_SECONDS,
+  });
+
+  await touchAppUserLastLogin(user.id);
 
   redirect("/");
 }

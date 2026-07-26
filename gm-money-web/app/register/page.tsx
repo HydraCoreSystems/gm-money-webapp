@@ -1,5 +1,6 @@
 import { getRegisterData, getActiveAccounts, type RegisterData } from "@/lib/register";
 import { Sidebar } from "@/components/Sidebar";
+import { DeleteRegisterEntryButton } from "@/components/DeleteRegisterEntryButton";
 
 export const dynamic = "force-dynamic";
 
@@ -101,6 +102,9 @@ export default async function RegisterPage({ searchParams }: { searchParams: { a
                   </div>
                   <div className="gm-register-row__actions">
                     <span className={statusBadgeClass(e.status)}>{e.status}</span>
+                    {e.source === "sheet_manual" && data && (
+                      <DeleteRegisterEntryButton id={e.id} accountId={data.accountId} description={e.description} />
+                    )}
                   </div>
                 </div>
               ))}

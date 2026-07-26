@@ -25,7 +25,7 @@ export default async function EntryPage() {
             <p className="gm-topbar__breadcrumb">Gathering Moss / Entry</p>
             <h1>Add a transaction.</h1>
             <p className="gm-topbar__lead">
-              Pick a category and the type -- Income or Expense -- is set automatically.
+              Pick a category and the type -- Income or Expense -- is set automatically. If you need a new one, add it right from the picker.
             </p>
           </div>
         </header>

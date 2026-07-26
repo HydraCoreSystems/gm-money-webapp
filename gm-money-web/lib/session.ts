@@ -16,6 +16,14 @@ const SESSION_MAX_AGE_SECONDS = 60 * 60 * 24 * 30; // 30 days
 const encoder = new TextEncoder();
 const decoder = new TextDecoder();
 
+export type SessionClaims = {
+  exp: number;
+  userId: string | null;
+  email: string | null;
+  displayName: string | null;
+  role: "owner" | "admin" | "member" | null;
+};
+
 function base64url(bytes: ArrayBuffer | Uint8Array): string {
   const arr = bytes instanceof Uint8Array ? bytes : new Uint8Array(bytes);
   let str = "";
@@ -38,30 +46,67 @@ async function getKey(secret: string) {
   ]);
 }
 
-export async function createSessionToken(secret: string): Promise<string> {
-  const payload = JSON.stringify({ exp: Date.now() + SESSION_MAX_AGE_SECONDS * 1000 });
+export async function createSessionToken(
+  secret: string,
+  identity?: {
+    userId?: string | null;
+    email?: string | null;
+    displayName?: string | null;
+    role?: "owner" | "admin" | "member" | null;
+  },
+): Promise<string> {
+  const payload = JSON.stringify({
+    exp: Date.now() + SESSION_MAX_AGE_SECONDS * 1000,
+    userId: identity?.userId ?? null,
+    email: identity?.email ?? null,
+    displayName: identity?.displayName ?? null,
+    role: identity?.role ?? null,
+  });
   const payloadB64 = base64url(encoder.encode(payload));
   const key = await getKey(secret);
   const sig = await crypto.subtle.sign("HMAC", key, encoder.encode(payloadB64));
   return `${payloadB64}.${base64url(sig)}`;
 }
 
-export async function verifySessionToken(secret: string, token: string | undefined | null): Promise<boolean> {
-  if (!token) return false;
+export async function readSessionToken(secret: string, token: string | undefined | null): Promise<SessionClaims | null> {
+  if (!token) return null;
   const [payloadB64, sigB64] = token.split(".");
-  if (!payloadB64 || !sigB64) return false;
+  if (!payloadB64 || !sigB64) return null;
 
   const key = await getKey(secret);
   const sigBytes = base64urlToBytes(sigB64);
   const valid = await crypto.subtle.verify("HMAC", key, sigBytes.buffer as ArrayBuffer, encoder.encode(payloadB64));
-  if (!valid) return false;
+  if (!valid) return null;
 
   try {
-    const payload = JSON.parse(decoder.decode(base64urlToBytes(payloadB64)));
-    return typeof payload.exp === "number" && payload.exp > Date.now();
+    const payload = JSON.parse(decoder.decode(base64urlToBytes(payloadB64))) as {
+      exp?: unknown;
+      userId?: unknown;
+      email?: unknown;
+      displayName?: unknown;
+      role?: unknown;
+    };
+
+    if (typeof payload.exp !== "number" || payload.exp <= Date.now()) return null;
+    const roleRaw = String(payload.role ?? "").toLowerCase();
+    const role = roleRaw === "owner" || roleRaw === "admin" || roleRaw === "member" ? roleRaw : null;
+
+    return {
+      exp: payload.exp,
+      userId: typeof payload.userId === "string" && payload.userId.trim().length > 0 ? payload.userId : null,
+      email: typeof payload.email === "string" && payload.email.trim().length > 0 ? payload.email : null,
+      displayName:
+        typeof payload.displayName === "string" && payload.displayName.trim().length > 0 ? payload.displayName : null,
+      role,
+    };
   } catch {
-    return false;
+    return null;
   }
+}
+
+export async function verifySessionToken(secret: string, token: string | undefined | null): Promise<boolean> {
+  const claims = await readSessionToken(secret, token);
+  return claims !== null;
 }
 
 export { SESSION_MAX_AGE_SECONDS };

@@ -4,8 +4,114 @@ import { revalidatePath } from "next/cache";
 import { getSupabaseServerClient, getBusinessId } from "@/lib/supabase";
 import { cookies } from "next/headers";
 import { ENTERED_BY_COOKIE_NAME } from "@/lib/session";
+import { createScheduledTransaction, validateScheduledAmountForCategory } from "@/lib/scheduled";
 
-export type CreateTransactionResult = { ok: true; id: string } | { ok: false; error: string };
+export type CreateTransactionResult =
+  | { ok: true; id: string; recurringCreated: boolean; recurringError?: string }
+  | { ok: false; error: string };
+
+const CATEGORY_REVALIDATE_PATHS = ["/", "/entry", "/register", "/review", "/scheduled", "/merchants", "/settings"];
+
+function revalidateCategoryPages() {
+  for (const path of CATEGORY_REVALIDATE_PATHS) {
+    revalidatePath(path);
+  }
+}
+
+export async function createCategory(
+  formData: FormData,
+): Promise<{ ok: true; category: { id: string; name: string; type: "income" | "expense" } } | { ok: false; error: string }> {
+  const name = String(formData.get("name") || "").trim();
+  const type = String(formData.get("type") || "expense");
+
+  if (!name) {
+    return { ok: false, error: "Category name is required." };
+  }
+
+  if (type !== "income" && type !== "expense") {
+    return { ok: false, error: "Category type is required." };
+  }
+
+  const supabase = getSupabaseServerClient();
+  const businessId = await getBusinessId();
+
+  const { data: inserted, error } = await supabase
+    .from("categories")
+    .insert({
+    business_id: businessId,
+    name,
+    category_type: type,
+    is_active: true,
+    sort_order: 1000,
+    })
+    .select("id, name, category_type")
+    .single();
+
+  if (error) return { ok: false, error: error.message };
+
+  revalidateCategoryPages();
+  return {
+    ok: true,
+    category: {
+      id: inserted.id,
+      name: inserted.name,
+      type: inserted.category_type === "income" ? "income" : "expense",
+    },
+  };
+}
+
+export async function createSubcategory(
+  formData: FormData,
+): Promise<
+  | { ok: true; subcategory: { id: string; name: string; parentId: string; type: "income" | "expense" } }
+  | { ok: false; error: string }
+> {
+  const parentId = String(formData.get("parentId") || "").trim();
+  const name = String(formData.get("name") || "").trim();
+
+  if (!parentId || !name) {
+    return { ok: false, error: "Parent category and subcategory name are required." };
+  }
+
+  const supabase = getSupabaseServerClient();
+  const businessId = await getBusinessId();
+
+  const { data: parent, error: parentError } = await supabase
+    .from("categories")
+    .select("category_type")
+    .eq("business_id", businessId)
+    .eq("id", parentId)
+    .maybeSingle();
+
+  if (parentError) return { ok: false, error: parentError.message };
+  if (!parent) return { ok: false, error: "Could not find that parent category." };
+
+  const { data: inserted, error } = await supabase
+    .from("categories")
+    .insert({
+    business_id: businessId,
+    parent_id: parentId,
+    name,
+    category_type: parent.category_type,
+    is_active: true,
+    sort_order: 1000,
+    })
+    .select("id, name")
+    .single();
+
+  if (error) return { ok: false, error: error.message };
+
+  revalidateCategoryPages();
+  return {
+    ok: true,
+    subcategory: {
+      id: inserted.id,
+      name: inserted.name,
+      parentId,
+      type: parent.category_type === "income" ? "income" : "expense",
+    },
+  };
+}
 
 // Category is the ONLY thing that determines Income vs Expense -- never a
 // client-supplied field. The category's type is looked up server-side and
@@ -26,6 +132,12 @@ export async function createTransaction(formData: FormData): Promise<CreateTrans
   const leafCategoryId = subcategoryId || categoryId;
   const paymentMethod = String(formData.get("paymentMethod") || "").trim() || null;
   const notes = String(formData.get("notes") || "").trim() || null;
+  const createRecurring = String(formData.get("createRecurring") || "false") === "true";
+  const recurringFrequency = String(formData.get("recurringFrequency") || "Monthly").trim() || "Monthly";
+  const recurringNextDue = String(formData.get("recurringNextDue") || date).trim() || date;
+  const recurringLimitText = String(formData.get("recurringLimit") || "").trim();
+  const recurringAutoCreate = String(formData.get("recurringAutoCreate") || "true") === "true";
+  const recurringLimit = recurringLimitText ? Number(recurringLimitText) : null;
 
   if (!date || !accountId || !payee || !amountText || !categoryId) {
     return { ok: false, error: "Date, account, payee, amount, and category are all required." };
@@ -55,6 +167,10 @@ export async function createTransaction(formData: FormData): Promise<CreateTrans
     };
   }
 
+  if (createRecurring && recurringLimit !== null && (!Number.isInteger(recurringLimit) || recurringLimit <= 0)) {
+    return { ok: false, error: "Recurring number of payments must be a whole number greater than zero." };
+  }
+
   const enteredBy = cookies().get(ENTERED_BY_COOKIE_NAME)?.value || null;
 
   const { data: inserted, error: insertError } = await supabase
@@ -80,7 +196,42 @@ export async function createTransaction(formData: FormData): Promise<CreateTrans
     return { ok: false, error: insertError?.message || "Could not save the transaction." };
   }
 
+  let recurringCreated = false;
+  let recurringError: string | undefined;
+  if (createRecurring) {
+    const recurringCategoryValidation = await validateScheduledAmountForCategory({
+      categoryId: leafCategoryId,
+      amount,
+    });
+
+    if (!recurringCategoryValidation.ok) {
+      recurringError = recurringCategoryValidation.error;
+    } else {
+      try {
+        await createScheduledTransaction({
+          payee,
+          amount,
+          accountId,
+          categoryId: leafCategoryId,
+          paymentMethod,
+          frequency: recurringFrequency,
+          nextDue: recurringNextDue,
+          occurrenceLimit: recurringLimit,
+          active: true,
+          autoCreate: recurringAutoCreate,
+          notes,
+        });
+        recurringCreated = true;
+      } catch (error) {
+        recurringError = error instanceof Error ? error.message : "Could not create recurring schedule.";
+      }
+    }
+  }
+
   revalidatePath("/");
   revalidatePath("/register");
-  return { ok: true, id: inserted.id };
+  if (createRecurring) {
+    revalidatePath("/scheduled");
+  }
+  return { ok: true, id: inserted.id, recurringCreated, recurringError };
 }

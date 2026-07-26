@@ -10,6 +10,11 @@ export default function ChangePasswordPage({
   return (
     <div className="gm-standalone">
       <div className="gm-card">
+        <div style={{ display: "flex", justifyContent: "flex-end", marginBottom: 10 }}>
+          <a href="/settings" className="gm-link-button">
+            Back to settings
+          </a>
+        </div>
         <h2 style={{ marginTop: 0 }}>Update password</h2>
         {searchParams.success && <p className="gm-success">{searchParams.success}</p>}
         {searchParams.error && <p className="gm-error">{searchParams.error}</p>}

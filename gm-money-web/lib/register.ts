@@ -1,4 +1,5 @@
 import { getSupabaseServerClient, getBusinessId } from "./supabase";
+import { processDueScheduledTransactions } from "./scheduled";
 
 type RawTransaction = {
   id: string;
@@ -16,6 +17,7 @@ export type RegisterEntry = {
   description: string;
   amount: number;
   status: string;
+  source: string;
   category: string | null;
   runningBalance: number;
 };
@@ -82,6 +84,8 @@ function dedupe(rows: RawTransaction[], explicitBankIdsToHide: Set<string>): Raw
 }
 
 export async function getRegisterData(accountId?: string): Promise<RegisterData> {
+  await processDueScheduledTransactions();
+
   const supabase = getSupabaseServerClient();
   const businessId = await getBusinessId();
 
@@ -151,6 +155,7 @@ export async function getRegisterData(accountId?: string): Promise<RegisterData>
       description: r.description,
       amount: Number(r.amount),
       status: r.status,
+      source: r.source,
       category: r.categories?.name ?? null,
       runningBalance,
     };
