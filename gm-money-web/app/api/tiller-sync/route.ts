@@ -44,6 +44,22 @@ function unauthorized() {
   return NextResponse.json({ ok: false, error: "Unauthorized" }, { status: 401 });
 }
 
+// Supabase/PostgREST errors are plain objects (not `instanceof Error`), so
+// `error instanceof Error ? error.message : "..."` silently swallows the
+// real database error text -- exactly what was masking the actual "Spend"
+// account failure as just "Sync failed".
+function describeError(error: unknown): string {
+  if (error instanceof Error) return error.message;
+  if (error && typeof error === "object") {
+    const maybe = error as { message?: unknown; details?: unknown; hint?: unknown; code?: unknown };
+    const parts = [maybe.message, maybe.details, maybe.hint].filter((p): p is string => typeof p === "string" && p.length > 0);
+    if (parts.length > 0) {
+      return maybe.code ? `[${maybe.code}] ${parts.join(" - ")}` : parts.join(" - ");
+    }
+  }
+  return "Sync failed";
+}
+
 // Deterministic key so re-running a sync (the whole point of a recurring
 // trigger) upserts the same real-world bank transaction instead of
 // inserting a duplicate row every run -- same shape as the old app's
@@ -161,17 +177,18 @@ export async function POST(request: NextRequest) {
 
     return NextResponse.json({ ok: true, received: transactions.length });
   } catch (error) {
+    const message = describeError(error);
     try {
       await logSyncEvent({
         businessId,
         status: "error",
         processedCount: 0,
-        errorMessage: error instanceof Error ? error.message : "Sync failed",
+        errorMessage: message,
       });
     } catch {
       // Sync should still return the original error even if telemetry logging fails.
     }
 
-    return NextResponse.json({ ok: false, error: error instanceof Error ? error.message : "Sync failed" }, { status: 500 });
+    return NextResponse.json({ ok: false, error: message }, { status: 500 });
   }
 }
