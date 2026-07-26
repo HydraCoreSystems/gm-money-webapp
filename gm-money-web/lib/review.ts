@@ -1,6 +1,7 @@
 import { getSupabaseServerClient, getBusinessId } from "./supabase";
 
-const CUTOFF_DATE = "2026-07-01";
+// Kept in sync with lib/dashboard.ts's CUTOFF_DATE -- see its comment.
+const CUTOFF_DATE = "2026-07-19";
 
 export type PendingReviewTransaction = {
   id: string;

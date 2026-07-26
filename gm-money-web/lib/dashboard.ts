@@ -2,11 +2,14 @@ import { getSupabaseServerClient, getBusinessId } from "./supabase";
 import { processDueScheduledTransactions } from "./scheduled";
 
 // Per the owner's explicit instruction: nothing before this date should
-// be considered "current" activity (2+ years of pre-existing history was
-// migrated, but he only cares about this year going forward). This does
-// NOT affect account balances (those are real point-in-time snapshots,
-// unaffected by which transactions we choose to display).
-const CUTOFF_DATE = "2026-07-01";
+// be considered "current" activity. The 2+ years of pre-existing history
+// that was originally migrated has since been purged outright (2026-07-26)
+// for a clean slate -- this filter is now mostly a no-op safety net rather
+// than the thing doing the real work, but kept in case older rows ever
+// reappear (e.g. a stale Tiller row synced late). This does NOT affect
+// account balances (those are real point-in-time snapshots, unaffected by
+// which transactions we choose to display).
+const CUTOFF_DATE = "2026-07-19";
 const CHART_DAY_WINDOW = 30;
 
 function startOfMonth(): string {
