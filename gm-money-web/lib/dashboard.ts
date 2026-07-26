@@ -12,9 +12,16 @@ import { processDueScheduledTransactions } from "./scheduled";
 const CUTOFF_DATE = "2026-07-19";
 const CHART_DAY_WINDOW = 30;
 
+// Floored at CUTOFF_DATE, same pattern as chartWindowStart() below --
+// calendar-month-start alone would (harmlessly, today) reach back before
+// the cutoff since nothing currently exists in that gap, but that's
+// fragile: the moment any data reappears there for any reason, "This
+// Month" would silently include it while every other stat on this screen
+// explicitly excludes it.
 function startOfMonth(): string {
   const now = new Date();
-  return `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+  const key = `${now.getFullYear()}-${String(now.getMonth() + 1).padStart(2, "0")}-01`;
+  return key < CUTOFF_DATE ? CUTOFF_DATE : key;
 }
 
 function toDateKey(date: Date): string {
