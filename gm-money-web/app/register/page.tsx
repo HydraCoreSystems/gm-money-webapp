@@ -1,6 +1,7 @@
 import { getRegisterData, getActiveAccounts, type RegisterData } from "@/lib/register";
 import { Sidebar } from "@/components/Sidebar";
 import { DeleteRegisterEntryButton } from "@/components/DeleteRegisterEntryButton";
+import { MatchToBankButton } from "@/components/MatchToBankButton";
 
 export const dynamic = "force-dynamic";
 
@@ -106,6 +107,9 @@ export default async function RegisterPage({ searchParams }: { searchParams: { a
                       <DeleteRegisterEntryButton id={e.id} accountId={data.accountId} description={e.description} />
                     )}
                   </div>
+                  {e.matchCandidate && data && (
+                    <MatchToBankButton manualId={e.id} accountId={data.accountId} candidate={e.matchCandidate} />
+                  )}
                 </div>
               ))}
             </div>

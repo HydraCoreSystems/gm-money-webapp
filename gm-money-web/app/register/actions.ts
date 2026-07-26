@@ -55,3 +55,67 @@ export async function deleteManualTransaction(formData: FormData): Promise<Delet
 
   return { ok: true };
 }
+
+export type MatchTransactionResult = { ok: true } | { ok: false; error: string };
+
+// Reconciliation: confirms that a manual entry and a bank-fed transaction
+// are the same real-world event. Records the link permanently
+// (transaction_matches, same as the old app's "Matched Bank Key") and
+// marks the manual entry Cleared -- bank-fed rows are already always
+// treated as cleared (see lib/register.ts's effectiveStatus), so this is
+// the only place a manual entry ever becomes Cleared.
+export async function matchToBank(formData: FormData): Promise<MatchTransactionResult> {
+  await requireAuthenticatedUser();
+
+  const manualId = String(formData.get("manualId") || "").trim();
+  const bankId = String(formData.get("bankId") || "").trim();
+  const accountId = String(formData.get("accountId") || "").trim();
+  if (!manualId || !bankId) {
+    return { ok: false, error: "Missing transaction ids." };
+  }
+
+  const supabase = getSupabaseServerClient();
+  const businessId = await getBusinessId();
+
+  const { data: rows, error: lookupError } = await supabase
+    .from("transactions")
+    .select("id, source")
+    .eq("business_id", businessId)
+    .in("id", [manualId, bankId]);
+
+  if (lookupError) return { ok: false, error: lookupError.message };
+
+  const manualRow = rows?.find((r) => r.id === manualId);
+  const bankRow = rows?.find((r) => r.id === bankId);
+  if (!manualRow || manualRow.source !== "sheet_manual") {
+    return { ok: false, error: "Not a valid manual entry." };
+  }
+  if (!bankRow || bankRow.source !== "tiller") {
+    return { ok: false, error: "Not a valid bank transaction." };
+  }
+
+  const { error: matchError } = await supabase.from("transaction_matches").insert({
+    business_id: businessId,
+    manual_transaction_id: manualId,
+    bank_transaction_id: bankId,
+    match_method: "manual_confirm",
+    confidence: 100,
+    matched_at: new Date().toISOString(),
+  });
+  if (matchError) return { ok: false, error: matchError.message };
+
+  const { error: updateError } = await supabase
+    .from("transactions")
+    .update({ status: "cleared", reconciled_at: new Date().toISOString() })
+    .eq("business_id", businessId)
+    .eq("id", manualId);
+  if (updateError) return { ok: false, error: updateError.message };
+
+  revalidatePath("/");
+  revalidatePath("/register");
+  if (accountId) {
+    revalidatePath(`/register?account=${accountId}`);
+  }
+
+  return { ok: true };
+}

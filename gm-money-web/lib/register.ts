@@ -11,6 +11,13 @@ type RawTransaction = {
   categories: { name: string } | null;
 };
 
+export type MatchCandidate = {
+  bankTransactionId: string;
+  description: string;
+  amount: number;
+  date: string;
+};
+
 export type RegisterEntry = {
   id: string;
   date: string;
@@ -20,6 +27,11 @@ export type RegisterEntry = {
   source: string;
   category: string | null;
   runningBalance: number;
+  // Set only for an unmatched manual entry the heuristic below thinks
+  // corresponds to a specific visible-elsewhere-hidden bank row -- lets
+  // the UI offer "confirm this match" instead of leaving it stuck
+  // Uncleared forever with no path to reconciliation.
+  matchCandidate: MatchCandidate | null;
 };
 
 export type RegisterData = {
@@ -51,18 +63,28 @@ function looksLikeSameMerchant(manualDescription: string, bankDescription: strin
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
+type DedupeResult = {
+  visible: RawTransaction[];
+  // Manual entries with an unconfirmed heuristic bank match -- the bank
+  // row is already hidden below, but nothing has permanently recorded
+  // the pairing yet, so the manual entry is still sitting Uncleared.
+  candidateByManualId: Map<string, RawTransaction>;
+};
+
 // Dedup: a manual (sheet_manual) entry and its matching bank (tiller) row
 // represent ONE real-world transaction -- the bank row must never also
 // appear, exactly like the old app's "Matched Bank Key" rule. Uses
 // explicit transaction_matches links first (authoritative), then a
-// same-account/same-amount/within-2-days/shared-word heuristic for pairs
-// the prior migration didn't explicitly record a match for.
-function dedupe(rows: RawTransaction[], explicitBankIdsToHide: Set<string>): RawTransaction[] {
+// same-account/same-amount/within-7-days/shared-word heuristic for pairs
+// nothing has explicitly matched yet.
+function dedupe(rows: RawTransaction[], explicitBankIdsToHide: Set<string>, explicitlyMatchedManualIds: Set<string>): DedupeResult {
   const manual = rows.filter((r) => r.source === "sheet_manual");
   const bank = rows.filter((r) => r.source === "tiller");
   const hiddenBankIds = new Set(explicitBankIdsToHide);
+  const candidateByManualId = new Map<string, RawTransaction>();
 
   for (const m of manual) {
+    if (explicitlyMatchedManualIds.has(m.id)) continue; // already permanently reconciled
     if (hiddenBankIds.size === bank.length) break;
     const mTime = new Date(m.transaction_date).getTime();
     for (const b of bank) {
@@ -76,11 +98,27 @@ function dedupe(rows: RawTransaction[], explicitBankIdsToHide: Set<string>): Raw
       if (Math.abs(bTime - mTime) > 7 * DAY_MS) continue;
       if (!looksLikeSameMerchant(m.description, b.description)) continue;
       hiddenBankIds.add(b.id);
+      candidateByManualId.set(m.id, b);
       break; // one bank row claimed per manual row
     }
   }
 
-  return rows.filter((r) => !hiddenBankIds.has(r.id));
+  return {
+    visible: rows.filter((r) => !hiddenBankIds.has(r.id)),
+    candidateByManualId,
+  };
+}
+
+// Bank-fed rows are, by definition, already cleared (Tiller only reports
+// transactions the bank actually posted). A manual entry is cleared once
+// it's reconciled against its bank counterpart -- explicitly confirmed,
+// not merely hidden by the heuristic above. Computed here rather than
+// trusted from the stored column so this stays correct even if some other
+// write path ever stores the wrong value.
+function effectiveStatus(row: RawTransaction, explicitlyMatchedManualIds: Set<string>): string {
+  if (row.source === "tiller") return "cleared";
+  if (explicitlyMatchedManualIds.has(row.id)) return "cleared";
+  return row.status;
 }
 
 export async function getRegisterData(accountId?: string): Promise<RegisterData> {
@@ -108,13 +146,14 @@ export async function getRegisterData(accountId?: string): Promise<RegisterData>
       .order("balance_date", { ascending: false })
       .limit(1)
       .maybeSingle(),
-    supabase.from("transaction_matches").select("bank_transaction_id").eq("business_id", businessId),
+    supabase.from("transaction_matches").select("manual_transaction_id, bank_transaction_id").eq("business_id", businessId),
   ]);
   if (snapshotError) throw new Error(snapshotError.message);
   if (matchesError) throw new Error(matchesError.message);
 
   const currentBalance = Number(snapshot?.balance ?? 0);
   const explicitBankIdsToHide = new Set((matches ?? []).map((m) => m.bank_transaction_id as string));
+  const explicitlyMatchedManualIds = new Set((matches ?? []).map((m) => m.manual_transaction_id as string));
 
   // Full history is needed for a correct running balance (not just the
   // recent window shown elsewhere). PostgREST silently caps any single
@@ -137,27 +176,38 @@ export async function getRegisterData(accountId?: string): Promise<RegisterData>
     if (!batch || batch.length < PAGE_SIZE) break;
   }
 
-  const deduped = dedupe(rawRows, explicitBankIdsToHide);
+  const { visible, candidateByManualId } = dedupe(rawRows, explicitBankIdsToHide, explicitlyMatchedManualIds);
 
   // Anchor: the current balance already reflects every cleared entry, so
   // walk backward first to find the balance *before* them, then forward
   // chronologically through everything (cleared and uncleared) so every
   // row gets a mathematically consistent running balance -- same
   // algorithm as the old app's Register.gs, not a naive running sum.
-  const clearedSum = deduped.filter((r) => r.status === "cleared").reduce((sum, r) => sum + Number(r.amount), 0);
+  const clearedSum = visible
+    .filter((r) => effectiveStatus(r, explicitlyMatchedManualIds) === "cleared")
+    .reduce((sum, r) => sum + Number(r.amount), 0);
   let runningBalance = currentBalance - clearedSum;
 
-  const entries: RegisterEntry[] = deduped.map((r) => {
+  const entries: RegisterEntry[] = visible.map((r) => {
     runningBalance += Number(r.amount);
+    const candidate = candidateByManualId.get(r.id);
     return {
       id: r.id,
       date: r.transaction_date,
       description: r.description,
       amount: Number(r.amount),
-      status: r.status,
+      status: effectiveStatus(r, explicitlyMatchedManualIds),
       source: r.source,
       category: r.categories?.name ?? null,
       runningBalance,
+      matchCandidate: candidate
+        ? {
+            bankTransactionId: candidate.id,
+            description: candidate.description,
+            amount: Number(candidate.amount),
+            date: candidate.transaction_date,
+          }
+        : null,
     };
   });
 

@@ -947,6 +947,18 @@ h3 {
   margin: 0;
 }
 
+.gm-register-row__match {
+  padding-top: 0.35rem;
+  border-top: 1px dashed var(--line);
+}
+
+.gm-register-row__match .gm-link-button {
+  color: var(--forest);
+  font-weight: 500;
+  white-space: normal;
+  text-align: left;
+}
+
 .gm-register-row__actions {
   display: flex;
   align-items: center;

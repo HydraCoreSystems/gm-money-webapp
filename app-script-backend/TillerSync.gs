@@ -23,7 +23,14 @@
  * ============================================================
  */
 
-const TILLER_SYNC_LOOKBACK_DAYS_ = 60;
+// The receiving endpoint (/api/tiller-sync) enforces its own CUTOFF_DATE
+// server-side regardless of this window, so this is just about not
+// resending months of data every 15 minutes -- not the thing keeping old
+// history out. (A 60-day window here once quietly repopulated 166
+// deliberately-purged pre-cutoff transactions before that server-side
+// enforcement existed.) 21 days comfortably covers the real ~4-day bank-
+// posting lag this data shows, with room to spare.
+const TILLER_SYNC_LOOKBACK_DAYS_ = 21;
 
 function syncTillerToGmMoneyWeb() {
   const props = PropertiesService.getScriptProperties();

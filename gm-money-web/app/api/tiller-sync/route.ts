@@ -3,6 +3,16 @@ import { getSupabaseServerClient, getBusinessId } from "@/lib/supabase";
 
 const SHARED_SECRET = process.env.TILLER_SYNC_SECRET;
 
+// Kept in sync with lib/dashboard.ts / lib/review.ts's CUTOFF_DATE. This
+// has to be enforced HERE, not just relied on via the Apps Script sender's
+// lookback window -- the recurring 15-minute sync re-sends its whole
+// window every run, so anything the sender includes for a date before
+// this would otherwise silently repopulate the history that was
+// deliberately purged for a clean slate (exactly what happened once
+// already: a 60-day sender window quietly brought back 166 pre-cutoff
+// rows within a couple of sync cycles).
+const CUTOFF_DATE = "2026-07-19";
+
 type IncomingPayload = {
   accountName?: string;
   balance?: number;
@@ -137,6 +147,7 @@ export async function POST(request: NextRequest) {
       const amount = Number(tx.amount ?? 0);
       const date = String(tx.date || "").trim();
       if (!description || !Number.isFinite(amount) || !date) continue;
+      if (date < CUTOFF_DATE) continue;
 
       const accountNameForTx = String(tx.account || payload.accountName || "").trim();
       let accountId: string | null = null;
@@ -159,6 +170,13 @@ export async function POST(request: NextRequest) {
       // every run would re-insert every transaction it's ever seen,
       // exactly the kind of duplicate-inflated-balance problem a manual
       // Register delete was just added to clean up.
+      // Bank-fed rows are, by definition, already cleared -- Tiller only
+      // reports transactions the bank has actually posted, never pending
+      // authorizations. The old app hardcoded this the same way
+      // (Register.gs's buildRegisterEntries_ always set status "Cleared"
+      // for bank entries; only manual entries carry a real
+      // Uncleared/Cleared distinction, resolved by matching them to their
+      // bank counterpart -- see app/register/actions.ts's matchToBank).
       const { error: txError } = await supabase.from("transactions").upsert(
         {
           business_id: businessId,
@@ -166,7 +184,7 @@ export async function POST(request: NextRequest) {
           description,
           amount,
           transaction_date: date,
-          status: "uncleared",
+          status: "cleared",
           source,
           source_record_id: sourceRecordId,
           currency: "USD",

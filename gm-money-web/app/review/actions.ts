@@ -29,13 +29,17 @@ export async function approveReviewTransaction(formData: FormData) {
     return { ok: false, error: "Could not resolve that category." };
   }
 
+  // Bank-fed rows are always cleared -- see lib/register.ts's
+  // effectiveStatus. Categorizing a transaction in Review doesn't change
+  // whether the bank has actually posted it (it already has, by
+  // definition, or Tiller wouldn't have reported it).
   const { error: updateError } = await supabase
     .from("transactions")
     .update({
       category_id: leafCategoryId,
       review_status: "approved",
       notes,
-      status: "uncleared",
+      status: "cleared",
     })
     .eq("id", transactionId)
     .eq("business_id", businessId)
