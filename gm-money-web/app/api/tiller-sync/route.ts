@@ -100,21 +100,30 @@ export async function POST(request: NextRequest) {
       if (!accountError && account) {
         const balance = Number(payload.balance ?? 0);
         if (Number.isFinite(balance)) {
-          // Upsert on (account_id, balance_date): a 15-minute trigger will
-          // call this many times a day, and without a conflict target
-          // every run would insert another same-day snapshot row.
+          const balanceDate = new Date().toISOString().slice(0, 10);
+
+          // This table already had a pre-existing unique constraint on
+          // (business_id, source, source_record_id) from the original
+          // adopted schema. Leaving source_record_id null meant every
+          // snapshot row shared the same (business_id, "tiller_sync",
+          // null) key -- only the first account synced each run could
+          // ever succeed, every account after it collided with that same
+          // slot. Giving each account+day a real, distinct
+          // source_record_id satisfies that existing constraint AND
+          // doubles as the idempotency key a recurring sync needs.
           const { error: snapshotError } = await supabase
             .from("account_balance_snapshots")
             .upsert(
               {
                 business_id: businessId,
                 account_id: account.id,
-                balance_date: new Date().toISOString().slice(0, 10),
+                balance_date: balanceDate,
                 balance,
                 currency: "USD",
                 source: "tiller_sync",
+                source_record_id: `${account.id}|${balanceDate}`,
               },
-              { onConflict: "account_id,balance_date" },
+              { onConflict: "business_id,source,source_record_id" },
             );
           if (snapshotError) throw snapshotError;
         }
