@@ -1,472 +1,448 @@
 # GM Money — Project Handoff / Current State
 
-**Last updated: 2026-07-25 (major update — see §2b/§5/§7).** This file exists so a fresh session (or a
-different tool, or a different person) can pick this project up cold,
-without depending on chat history or any AI's memory of past sessions.
-Update it whenever a phase completes or a real decision gets made — treat
-it as the source of truth for "where are we," not a historical log (for the
-full chronological history of how the app got here, that lives in Claude's
-own memory files, not this repo — this document is a snapshot, not a diary).
+**Last updated: 2026-07-27 (major rewrite — the previous version, from
+2026-07-25, predated an entire other AI session plus this whole session's
+work; see §2b/§3/§7 for what actually changed).** This file exists so a
+fresh session (or a different tool, or a different person) can pick this
+project up cold, without depending on chat history or any AI's memory of
+past sessions. Update it whenever a phase completes or a real decision
+gets made — treat it as the source of truth for "where are we," not a
+historical log.
 
 ---
 
 ## 1. Overall goal and scope
 
 "Gathering Moss Financial Center" (GM Money) is a small-business
-bookkeeping system for a real plant/hoya business, used daily by the owner
-(Phil) and his wife (Crystal) to enter transactions and review the
-business's finances. It started as a Google Sheet (Tiller-powered bank
-sync + Apps Script automation) and was rebuilt into a real web app over
-many sessions. Guiding philosophy, in the owner's own words: **"Money with
-modern amenities"** — it should feel like a spiritual successor to
-Microsoft Money (nested category tree, unified transaction ledger,
-at-a-glance dashboard), not a generic budgeting app, but with a genuinely
-modern, polished, visually rich 2020s interface and increasingly real AI
-intelligence behind it (a "co-CFO," not just a form that stores numbers).
+bookkeeping system for a real Whatnot/plant-adjacent resale business, used
+daily by the owner (Phil) and his wife (Crystal) to enter transactions and
+review the business's finances. It started as a Google Sheet
+(Tiller-powered bank sync + Apps Script automation) and is being rebuilt
+into a real web app. Guiding philosophy, in the owner's own words: **"Money
+with modern amenities"** — a spiritual successor to Microsoft Money
+(nested category tree, unified transaction ledger, at-a-glance dashboard),
+with a genuinely modern, polished, visually rich interface and increasing
+real AI intelligence behind it. As of this session the app is branded
+**"GM Money 2026"** (owner's own naming, in tribute to Microsoft Money's
+old "product + year" convention) — see the Sidebar lockup, browser tab
+title, and PWA manifest.
 
-**Current top-level goal (active as of 2026-07-25): migrate the entire
-backend off Google Apps Script + Google Sheets onto Next.js + Supabase
-(Postgres)**, because the Apps Script version is too slow in real daily
-use (Register/Settings can take seconds to tens of seconds to load). This
-is happening in parallel with the old app — nobody's daily workflow
-changes until a deliberate, explicit cutover (see §9).
+**The migration off Google Apps Script + Sheets onto Next.js + Supabase is
+now deployed to production and in active real use** — this session was
+almost entirely Crystal/Phil using `gm-money-web` for actual bookkeeping
+and reporting real bugs as they hit them, not a side-by-side test. See §9
+for an important open question this raises about the old system.
 
 ---
 
-## 2. Current architecture — TWO systems exist right now, side by side
+## 2. Current architecture
 
-### 2a. The OLD system (still live, still what Phil/Crystal use daily)
+### 2a. The OLD system (`gm-money-frontend` + `app-script-backend`)
 
 ```
 gm-money-frontend/   Vite + React + TypeScript SPA
-app-script-backend/  Google Apps Script Web App (Api.gs = single doPost dispatch point, 35 actions)
+app-script-backend/  Google Apps Script Web App (Api.gs = single doPost dispatch, 35 actions)
                      backed by a real Google Sheet + Tiller (bank sync add-on)
 ```
 
-- Frontend calls `callApi<T>(action, payload)` (`gm-money-frontend/src/api/client.ts`),
-  which POSTs `{action, password, payload}` as `text/plain` (deliberately —
-  keeps it a CORS "simple request" since Apps Script Web Apps can't handle
-  preflight) to `VITE_GM_API_URL`.
-- Auth: one shared password, stored in Apps Script Script Properties
-  (`GM_API_PASSWORD`), checked server-side on every request, plain-text
-  equality (no hashing).
-- Deployed: Vercel project `gm-money-webapp` (Root Directory =
-  `gm-money-frontend`), auto-deploys on push to `main`. Apps Script backend
-  deployed via `clasp` (already authenticated on this machine).
-- **This system is fully functional and in daily use — do not break it
-  while working on the migration.** It only gets touched/decommissioned at
-  the explicit cutover step (§9), not before.
+Still exists in this repo, untouched in its own logic except for one
+addition this session: **`TillerSync.gs`** (new file, pushed via `clasp`)
+that reads Tiller's own `Transactions`/`Balance History` sheets and POSTs
+to the new system's `/api/tiller-sync` on a 15-minute trigger — see §2b.
+Whether Phil/Crystal still use the raw Sheets UI directly at all anymore
+is now an open question (§9), not something to assume either way.
 
-### 2b. The NEW system (in progress, not live yet, not used by anyone)
+### 2b. The NEW system (`gm-money-web/`) — deployed, live, in real use
 
 ```
 gm-money-web/   Next.js 14 (App Router) + React 18 + TypeScript
                 Supabase Postgres (schema: gm_money, inside HydraCloud's
-                existing Supabase project — see §6 for why)
+                existing Supabase project, ref qptipjjribhwjjakmwjx)
 ```
 
+- **Live in production**: `https://gm-money-web.vercel.app` (Vercel
+  project `gm-money-web`, team `gathering-moss`). Deploys are **manual**
+  — `vercel --prod` run directly from this machine, not a git-push-triggered
+  auto-deploy. **After any code change, both a git push AND a `vercel --prod`
+  run are required** — pushing to GitHub alone does not deploy.
 - No separate backend — Next.js Server Actions/Server Components/Route
-  Handlers ARE the backend, querying Supabase directly via
-  `@supabase/supabase-js` (no ORM), using the **service-role key,
-  server-side only** (never exposed to the browser).
-- **MAJOR PIVOT (2026-07-25, discovered mid-session):** the `gm_money`
-  schema this app uses is **NOT** the schema originally designed in
-  `docs/migration-plan.md` — a prior ChatGPT session had already built a
-  more sophisticated, populated schema directly against this same
-  Supabase project (multi-tenant-ready: `businesses`/`business_members`;
-  a unified `transactions` table instead of split manual/bank tables;
-  `transaction_splits`, `transaction_matches`, `counterparties`,
-  `integration_sources`/`sync_runs`/`source_records` as a generic
-  bank-sync framework instead of Tiller-specific mirror tables;
-  `attachments`, `audit_events`). **Confirmed as real, genuine Gathering
-  Moss data** (real payees, real categories, real Tiller Google Sheet ID
-  referenced in `integration_sources`) — 4,674 real transactions spanning
-  2024-07-16 through 2026-07-27. **This existing schema is now what the
-  app is built against — the original from-scratch schema in this
-  document's earlier sections and in `docs/migration-plan.md` is
-  superseded.** `gm-money-web/supabase/schema.sql` has been rewritten to
-  document the REAL adopted schema (reverse-engineered from PostgREST
-  introspection) instead of the original invented one. **The Tiller-sync
-  design in `docs/migration-plan.md` (tiller_* mirror tables, 15-min Apps
-  Script push) is also superseded** — needs a fresh design pass reusing
-  `integration_sources`/`sync_runs`/`source_records` instead. Per the
-  owner's explicit instruction, the app should filter out anything dated
-  before 2026-07-01 (not necessarily delete the old rows — filter at the
-  query level unless he confirms otherwise).
-- Auth: ported near-verbatim from the sibling `skrybix-webapp` repo —
-  bcrypt-hashed password in `gm_money.site_auth`, HMAC-SHA256-signed
-  session cookie via Web Crypto (`crypto.subtle`, so identical code runs
-  in Edge middleware and Node Server Actions), `middleware.ts` gates every
-  route except `/login`, `/api/tiller-sync`, `/api/cron/**`.
-- Not yet deployed anywhere (no Vercel project created for it yet — that's
-  an upcoming task, not done).
-- **Tiller cannot integrate with Postgres at all — it only writes to
-  Google Sheets.** So Google Sheets stays permanently in the picture as
-  where Tiller lands bank data. The plan (see §8) keeps a slimmed-down
-  `app-script-backend` alive forever, purely as a sync bridge pushing
-  Tiller's sheets into Postgres mirror tables every 15 minutes — everything
-  else (all app-owned data) does a one-time cutover to Postgres and never
-  touches Sheets again.
+  Handlers ARE the backend, querying Supabase via `@supabase/supabase-js`
+  (service-role key, server-side only).
+- **Schema**: the `gm_money` schema was originally built and populated by
+  a *different* AI session (OpenAI's Codex, working via `AGENTS.md` — a
+  near-duplicate of this file's sibling `CLAUDE.md`, discovered this
+  session) before this repo's own from-scratch schema plan was ever
+  applied. It's a real, multi-tenant-ready design (`businesses`, unified
+  `transactions` table with `source` discriminator, `transaction_matches`,
+  `merchant_rules`, `recurring_transactions`, `account_balance_snapshots`,
+  etc.) — see `gm-money-web/supabase/schema.sql` for the documented
+  (reverse-engineered) shape and `gm-money-web/supabase/migrations/` for
+  every additive change made on top of it.
+- **Auth is REAL per-user accounts now** — this reached the "eventual
+  target" milestone described in `CLAUDE.md`'s Auth section (not just a
+  single shared password anymore). `gm_money.app_users` (bcrypt password
+  hashes, `owner`/`admin`/`member` roles), `/setup` self-registers the
+  first owner account, `/settings/users` adds more. Session cookie is
+  HMAC-SHA256-signed via Web Crypto (`lib/session.ts`), same pattern as
+  `skrybix-webapp`. `middleware.ts` gates everything except
+  `/login`, `/setup`, `/api/health`, `/api/tiller-sync`, `/api/cron/**`,
+  and the PWA assets (`icon.png`, `apple-icon.png`,
+  `manifest.webmanifest` — these must stay reachable without a session
+  since browsers/iOS fetch them unauthenticated).
+- **Tiller sync is real and running** — `TillerSync.gs` pushes to
+  `/api/tiller-sync` every 15 minutes; the route upserts idempotently
+  (on `business_id, source, source_record_id` for transactions; a
+  synthesized `${account_id}|${balance_date}` key for balance snapshots,
+  routed through a *pre-existing* constraint on that table that wasn't
+  documented anywhere — see §5 for the exact gotcha) and enforces
+  `CUTOFF_DATE` server-side regardless of what the sender includes (a real
+  bug found and fixed this session — see §7).
+- **PWA / mobile**: `/lite` is a stripped-down, phone-first view (account
+  balances + the entry form only, no Sidebar/Register/Settings/etc.) meant
+  to live on Crystal's iPhone home screen. `app/manifest.ts` +
+  `appleWebApp` metadata in `app/layout.tsx` + real `icon.png`/
+  `apple-icon.png` (hand-encoded PNGs — Next's dynamic `icon.tsx`
+  convention crashes on Windows, a `@vercel/og` bug unrelated to this app)
+  make "Add to Home Screen" open full-screen with a real branded icon.
+  `start_url` in the manifest points at `/lite`.
+- **AI advisor is real and live**, not just planned. Two tiers, both
+  built:
+  1. **Co-CFO Insights** (`lib/advisor.ts`) — free, data-driven (runway,
+     month-end pace, category concentration, review-queue health, 7-day
+     trend), always rendered on the Dashboard, no API cost.
+  2. **Ask GM Money** (`lib/ai-advisor.ts`, `app/api/ai/advice/route.ts`)
+     — a real LLM call, on-demand only (fires when a question is actually
+     submitted, not on page load). **Uses OpenAI (`gpt-4o-mini`), not
+     Anthropic** — `OPENAI_API_KEY`/`OPENAI_MODEL` are set in Vercel
+     Production. This was wired in by the other AI session without an
+     explicit recorded cost sign-off from the owner (per `CLAUDE.md`'s
+     rule that a real model call needs that first); when raised with him
+     this session he chose to keep it as-is rather than switch/remove it
+     — treat that as the sign-off going forward, but the vendor choice
+     (OpenAI vs. Anthropic) was never a deliberate decision, just what the
+     other AI defaulted to.
+  Logged to `gm_money.ai_advice_log` with outcome tracking (mark a past
+  answer as followed/not-followed, with a note).
 
 ---
 
 ## 3. Completed features
 
-### On the OLD system (all shipped, all live in production today)
-1. Transaction entry (password gate, Phil/Crystal "who" picker, real
-   nested Income/Expense category picker)
-2. Register (unified ledger: manual + bank-fed transactions deduplicated,
-   running balance computed backward-then-forward from the real bank
-   balance) — full CRUD, not just view-only
-3. Review (bank-fed transactions get categorized, auto-registers new
-   categories into Tiller's own separate Categories sheet)
-4. Dashboard (cash position, income/expenses this month, spending-by-category
-   pie chart, budget progress bars with pace warnings, account balances,
-   recent transactions)
-5. Settings (categories/subcategories/payment methods CRUD, budgets)
-6. Scheduled/recurring transactions (CRUD + a daily 3am auto-generator)
-7. Merchant Memory (confidence-scored auto-categorization learning)
-8. Budgeting (data-driven suggestions from real trailing spending history,
-   not guessed cold; over-budget pace warnings)
-9. Email notifications (daily digest, per-recipient preferences, via
-   Apps Script's free `MailApp`)
-10. **Full visual redesign** (2026-07-25, same session that started the
-    migration): sidebar shell replacing the old top-tab nav, a new
-    forest/sage/amber design-token system modeled on a sibling app's
-    ("Gathering Moss Marketplace") visual language, a real nested
-    Income/Expense category picker with search (replacing native
-    `<optgroup>` selects), a Light/Dark/System theme toggle in Settings.
+### On the OLD system (Sheets/Apps Script) — unchanged this session
+Transaction entry, Register, Review, Dashboard, Settings, Scheduled,
+Merchant Memory, data-driven Budgeting, email notifications (via
+`MailApp`), full visual redesign. See the previous version of this file
+(git history) for the detailed list — not repeated here since focus has
+shifted to the new system.
 
-### On the NEW system (`gm-money-web/`) — Phase 0-2ish, further along than the phase numbers suggest
-- Next.js skeleton, styled identically to the just-redone old app
-  (`theme.css` copied verbatim into `app/globals.css`).
-- Full auth stack: login page (with the Phil/Crystal picker preserved),
-  session cookie, self-service change-password page. **Verified working
-  end-to-end against the real, adopted schema** — real bcrypt password
-  check, real session cookie, real redirect. Password was bootstrapped via
-  `scripts/seed-site-auth.mjs` (random-generated, told to the owner once —
-  he still needs to change it via `/settings/password`).
-- Adopted an **existing, already-populated** Postgres schema (see the
-  pivot note above) rather than the originally-designed one — real
-  Gathering Moss data (4,674 transactions, 78 categories, 61 merchant
-  rules, 2 accounts) is already sitting in it, migrated by a prior ChatGPT
-  session. `gm-money-web/supabase/schema.sql` now documents this real
-  schema. Nothing built so far in `gm-money-web` had to be thrown away —
-  only the login/auth code existed, and it's schema-agnostic (just needed
-  one additive `site_auth` table + a `GRANT`, both applied).
-- **Dashboard, Register, and Entry are now real and verified working**
-  against live data (not placeholders): Dashboard shows correct account
-  balances/income/expenses/pending-review/uncleared counts; Register
-  computes a mathematically verified running balance with real dedup
-  between manual and bank-fed duplicate rows; Entry has a working nested
-  category picker and successfully inserts real transactions (verified
-  via a real insert-then-delete test, then cleaned up). Still missing:
-  Review (bank-transaction categorization queue), Settings, Scheduled,
-  Merchant Memory, Budgets, notifications, the Tiller sync mechanism
-  (still relies on the schema's existing data, nothing keeps it fresh
-  yet), and cron jobs.
-- **Two real bugs hit and fixed while building these**: (1) PostgREST
-  silently caps any request at 1000 rows regardless of `.range()` — a
-  naive full-history fetch for Register's balance math was silently
-  wrong until this was caught and fixed with proper pagination. (2) The
-  `transactions.review_status` check constraint doesn't accept the value
-  `'reviewed'` — real valid values are `'unreviewed'`/`'approved'`.
+### On `gm-money-web/` — the real current state
+- **Auth**: real per-user accounts, `/setup`, `/login`, `/settings/users`,
+  `/settings/password`. See §2b.
+- **Dashboard**: account balances, income/expenses this month (floored at
+  `CUTOFF_DATE`, not calendar-month-start), 30-day cashflow chart
+  (Recharts `AreaChart`, real gradient fills), Expense Constellation pie
+  chart (Recharts `PieChart`/`Pie`/`Cell` — see §7 for a real rendering
+  bug found and fixed here), Co-CFO Insights + Ask GM Money (§2b), a "Last
+  Tiller Sync" status tile, recent activity list.
+- **Register**: unified ledger, backward-then-forward running balance,
+  manual/bank dedup (explicit `transaction_matches` rows + a same-account/
+  same-amount/within-7-days/shared-word heuristic for unconfirmed pairs).
+  **Real reconciliation UI** (built this session): a manual entry with a
+  detected-but-unconfirmed bank counterpart shows the *actual* candidate
+  bank row (not just a text description) so the user can visually compare
+  before confirming; confirming permanently links them
+  (`transaction_matches`, `match_method='manual'` — see §5 for why not
+  `'manual_confirm'`) and marks the manual entry Cleared. Bank-fed rows
+  are always treated as Cleared (computed at read time, not trusted from
+  the stored column — see `lib/register.ts`'s `effectiveStatus()`).
+  Manual-entry delete button (source=`sheet_manual` only, confirms before
+  deleting).
+- **Entry**: nested Income/Expense category picker with inline
+  category/subcategory creation, optional recurring-schedule creation
+  alongside a one-time entry.
+- **Review**: bank-fed transaction categorization queue.
+- **Scheduled**: recurring transactions CRUD, a real calendar view with a
+  colored dot on due dates, daily auto-post (cron) + "run now" button.
+- **Merchants**: merchant memory management (confidence-scored
+  auto-categorization).
+- **Settings**: categories, budgets, notification recipients (per-
+  recipient prefs — digest computation exists, **actual email sending is
+  still stubbed**, nobody has picked a provider), password, users.
+- **Tiller sync**: real, running, idempotent (§2b, §7).
+- **PWA/`/lite`**: real installable mobile view (§2b).
+- **Visual design**: a full "premium" pass this session — bold
+  jewel-tone chart colors with gradient fills and glow-on-hover, gradient
+  buttons/cards/badges app-wide, a richer Sidebar (glow, gradient active
+  state, accent bar), gradient/glow standalone-card treatment on
+  Login/Setup. Rebranded as **"GM Money 2026"** (Sidebar lockup, browser
+  tab title, Apple home-screen title, PWA manifest name — deliberately
+  *not* the manifest's `short_name`, which stays "GM Money" so it doesn't
+  truncate under a phone home-screen icon). The actual business name
+  ("Gathering Moss") is untouched everywhere it appears as business
+  context (breadcrumbs, the database lookup in `lib/supabase.ts`) — only
+  the app's own product identity changed.
+- **Data**: the ~2 years of originally-migrated transaction history was
+  **deliberately purged** this session at the owner's explicit request
+  for a clean slate — `CUTOFF_DATE = "2026-07-19"` (`lib/dashboard.ts`,
+  exported and reused, not re-hardcoded elsewhere). Only 44 transactions
+  existed right after the purge; real activity has grown since via the
+  now-working Tiller sync. The Google Sheet still has the full history —
+  nothing was lost, just no longer duplicated in Postgres. **The receiving
+  endpoint enforces this cutoff itself** (§7) so a sync misconfiguration
+  can't silently repopulate old data again.
+- **Version control**: everything above — the other AI's entire session
+  plus this session's work — is now actually committed and pushed to
+  GitHub (`HydraCoreSystems/gm-money-webapp`, `main`). It was NOT before
+  this session started (see §7) — deploys had been happening straight to
+  Vercel with no git history at all, which was a real risk (no rollback
+  safety, GitHub silently out of sync with what was actually live).
 
 ---
 
 ## 4. In-progress / missing
 
-**Done so far in `gm-money-web`**: auth (login/logout/change-password),
-Dashboard, Register, Entry — all real, all verified against live data
-(see §3). **Still to build**: Review (bank-transaction categorization
-queue), Settings (categories/payment-methods CRUD, budgets management),
-Scheduled/recurring transactions, Merchant Memory, the notification
-digest (port the logic, sending stays stubbed), an ongoing Tiller sync
-mechanism (nothing keeps `gm_money`'s data fresh right now — it's a
-frozen snapshot from whenever the prior ChatGPT session migrated it;
-needs a fresh design reusing `integration_sources`/`sync_runs`/
-`source_records`, since the original tiller_*-mirror-table plan in
-`docs/migration-plan.md` no longer applies to the adopted schema), cron
-jobs, a Vercel project for `gm-money-web`, the parallel-run verification
-window, and the actual cutover (§9).
-
-Beyond the migration, explicitly deferred (not started, not scoped in
-detail yet):
-- **Real AI "co-CFO" features** — an actual Claude API call for narrative
-  financial guidance (the owner's stated real reason for wanting this
-  rebuilt with Claude at all, per `CLAUDE.md`'s "AI / intelligence
-  direction" section). Needs an Anthropic API key + the owner's sign-off on
-  ongoing per-call cost before implementation starts.
-- **Reports screen** — never scoped in detail, the last item on the
-  original (pre-migration) milestone list.
+- **Notification digest emailing** — prefs UI and per-recipient
+  compute logic exist; nothing actually sends an email yet. No provider
+  chosen.
+- **Real AI co-CFO vendor decision** — currently OpenAI, not Anthropic
+  (see §2b). The owner was asked directly this session whether to switch;
+  he chose to leave it as-is since it's cheap and already working. Not
+  revisit unless he raises it again.
+- **Retail pricing guide** — the owner asked how hard this would be
+  (an AI-assisted "what should I charge for this item" tool). Discussed,
+  not built. The easy version (a form + an LLM call, reusing the existing
+  `lib/ai-advisor.ts` infrastructure) vs. the harder version (grounded in
+  real historical cost/margin data) was discussed — there's currently no
+  "product" concept anywhere in this schema at all, so the grounded
+  version needs real scoping before starting.
+- **Reports screen** — never scoped in detail.
 - **Two known pre-existing bugs in the ORIGINAL Sheets-native code**
-  (already fixed in the Apps Script API layer, never fixed in the raw
-  Sheets functions): `Entry.gs: saveEntry()` writes Subcategory to the
-  wrong column; `Dashboard.gs: getManualDashboardSummary_()` derives
-  Income/Expense from the amount's sign instead of the category's type.
-  Open question for the owner: does raw-Sheets-UI access still matter once
-  Postgres is primary, or is it being retired entirely?
-- **Real per-user accounts** (not the current single shared password) —
-  explicitly the eventual target for GM Money AND both sibling apps
-  (HydraCloud, Skrybix), per the owner's 2026-07-23 direction. Not started.
-  Should be self-registration (each person sets their own username/password
-  on first login), not admin-provisioned, per the owner's explicit
-  preference.
-- Real (non-stubbed) email sending for the notification digest — provider
-  not yet chosen (owner said "skip for now" when asked; the digest logic
-  itself should still be fully ported, just log instead of send).
-- A Vercel project for `gm-money-web` — not created yet.
+  (`Entry.gs: saveEntry()` subcategory-wrong-column;
+  `Dashboard.gs: getManualDashboardSummary_()` sign-based income/expense) —
+  still open, still unresolved, still gated on the open question in §9
+  about whether raw-Sheets access matters going forward.
+- **Next.js 14 → 16 bump** — not done, still a cross-sibling-app decision
+  to raise with the owner, not something to do unilaterally.
+- **Merchant-memory rebuild after the data purge** — `rebuildMerchantRules()`
+  exists and scans all categorized transactions to (re)learn confidence
+  scores; nobody has needed to run it since the purge (existing
+  `merchant_rules` rows were untouched by the purge, they're independent
+  of transaction history), but worth knowing it would now learn from a
+  much thinner dataset if ever re-run.
+- **The empty-`transaction_matches`-table mystery** — at one point this
+  session the table was found completely empty when 4 rows were expected
+  to still exist (verified via direct query, not a caching illusion).
+  It's stable and correct now, and doesn't appear to be recurring, but the
+  root cause was never identified. Worth a raised eyebrow if match rows
+  ever seem to vanish again.
 
 ---
 
-## 5. Important constraints, decisions, and data model rules (do not relitigate without a real reason)
+## 5. Important constraints, decisions, and data model rules
 
-**These are load-bearing. Getting any of these wrong once already caused
-real bugs in this project's history — see §7 "Known bugs" below.**
+**Everything from the previous version of this file still applies**
+(Category→Type invariant, Tiller's Categories-sheet write-back
+requirement, the Register running-balance algorithm, Merchant Memory's
+confidence math, budget-suggestion math, the Settings sheet's column-range
+fragility, the shared design system, the three-sibling-apps convergence
+goal). Additions from this session:
 
-1. **Category → Type is a hard invariant.** Type ("Income"/"Expense") is a
-   property of the Category only, NEVER independently settable, and never
-   accepted as client-supplied input — it's always derived server-side from
-   the category. In the new Postgres schema this is now a database-level
-   `check` constraint (`gm_money.categories.type`), not just an
-   application-discipline convention.
-2. **Tiller integration cannot move to Postgres.** Tiller only writes to
-   Google Sheets. Approving a bank transaction must still register the
-   category into Tiller's own separate `Categories` sheet (its own
-   validation list, unrelated to GM Money's own Settings categories) before
-   writing it into a bank transaction's Category column, or Tiller silently
-   rejects the write.
-3. **Register's running-balance algorithm** (the most complex logic in the
-   whole system): walk BACKWARD from the current real bank balance
-   (subtracting every currently-cleared entry) to derive the implied
-   starting balance, then walk FORWARD chronologically through cleared +
-   uncleared entries assigning each a running balance. A manual entry with
-   a "Matched Bank Key" suppresses its corresponding bank-fed row from also
-   appearing (dedup). This must be ported as a real algorithm, not
-   reinvented — see `app-script-backend/Register.gs` lines 399-610.
-4. **Merchant Memory confidence learning**: +4 confidence on a repeat match
-   to the same category (cap 100), −12 on a conflicting category (floor
-   40; below the 70 "replacement threshold" the stored category gets
-   overwritten), locked records never auto-update, ≥90 confidence
-   auto-applies a category in Review, ≥70 merely suggests it. When a manual
-   transaction is later matched to a bank transaction, teach BOTH the
-   clean manual payee text AND the messy raw bank description (a real past
-   bug: only teaching the clean side meant the ugly bank text was never
-   recognized next time).
-5. **Budget suggestions use real trailing spending data**, not a guess —
-   average up to 3 trailing months per category, divide by however many
-   months actually had real data (not a fixed divisor), extrapolate the
-   in-progress current month via `spend-so-far × daysInMonth/dayOfMonth`.
-6. **`GM_ManualTransactions`'s column order has already drifted once in
-   production** — a legacy "Business Area" column sits at index 6, the real
-   Subcategory column was appended at index 17 instead of where any
-   documentation implies. Any code reading this sheet (including a future
-   migration script) must map columns by header name, never by fixed index.
-7. **The Settings sheet is column-range based, not row-based** — several
-   independent lists (Categories A4:C100, Payment Methods D4:D100,
-   Transaction Types F4:F20, Frequencies H4:H20) share the same physical
-   rows. Never `deleteRow`/`insertRow` on it (shifts every other column's
-   independent list) — this whole problem disappears in the new Postgres
-   schema, which is exactly why it's worth finishing the migration rather
-   than patching this in place.
-8. **Design system**: forest/sage/amber palette, Georgia display serif +
-   Inter body font, defined as CSS custom properties in
-   `gm-money-frontend/src/styles/theme.css` (and copied verbatim into
-   `gm-money-web/app/globals.css`). Gradients and real visual depth/richness
-   are explicitly WANTED (not old Microsoft-Money-style flatness) — see
-   `CLAUDE.md`'s "Design language" section for the full brief.
-9. **The three sibling apps** (GM Money, HydraCloud, Skrybix) are meant to
-   converge toward the same visual language and the same Next.js + Supabase
-   architecture pattern over time — decisions made in one should generally
-   be checked against/reused in the others, not reinvented per-app.
+1. **`transaction_matches.match_method` has a check constraint whose
+   allowed values aren't documented anywhere and aren't exposed via
+   PostgREST** (no error detail beyond "violates check constraint"; the
+   table had no surviving rows to infer from when this was hit). Confirmed
+   empirically: `'manual'` is accepted. Don't guess a "more descriptive"
+   value without testing first — it will fail with a generic constraint
+   error, not a helpful one.
+2. **`account_balance_snapshots` has a pre-existing unique constraint on
+   `(business_id, source, source_record_id)` from the originally-adopted
+   schema** that isn't obvious from the column list alone. The Tiller sync
+   route upserts against this constraint using a synthesized
+   `${account_id}|${balance_date}` as `source_record_id` — do not go back
+   to leaving `source_record_id` null for new snapshot rows, or every
+   account after the first one synced in a given run will collide against
+   the same `(business_id, source, null)` slot (a real bug hit and fixed
+   this session).
+3. **Bank-fed (`source='tiller'`) transactions are always Cleared**,
+   computed at read time in `lib/register.ts`'s `effectiveStatus()`, never
+   trusted from the stored `status` column. A manual entry only becomes
+   Cleared by being explicitly matched to its bank counterpart via
+   `app/register/actions.ts`'s `matchToBank()` — there's no other path to
+   Cleared for a manual entry. This mirrors how the old Sheets app
+   actually worked (bank data was never independently "uncleared").
+4. **Concurrent Supabase queries via `Promise.all` on the same client
+   instance could silently return an empty result for one of them** — no
+   error, no exception, just wrong data. Confirmed live (a temporary
+   side-by-side diagnostic proved a raw `fetch()` to the identical
+   endpoint, in the same execution, returned correctly while the
+   supabase-js call didn't). Root cause suspected to be Next.js's fetch
+   caching/deduplication layer interfering, not fully proven. Fixed at the
+   client-factory level (`lib/supabase.ts` now forces every request
+   through with `cache: "no-store"` explicitly, regardless of which fetch
+   implementation supabase-js resolves internally) plus de-parallelized
+   the two queries in `lib/register.ts` specifically as defense in depth.
+   **If something similar (right query, wrong/empty result, no error) is
+   ever seen again anywhere else that uses `Promise.all` with Supabase
+   queries, this is the first thing to suspect.**
+5. **Recharts 3.10.0's animated `Pie`/`Sector` rendering can silently
+   paint nothing** — confirmed live: with `isAnimationActive` on, every
+   `recharts-pie-sector` group rendered completely empty (no `<path>` at
+   all). Disabling animation on the `Pie` specifically fixed it
+   immediately; the `AreaChart` on the same dashboard animates fine, so
+   this isn't a broader library problem, just Pie/Sector animation in this
+   version. Don't re-enable `isAnimationActive` on that `<Pie>` without
+   testing that shapes still actually render.
+6. **A `next/script` `strategy="beforeInteractive"` script can
+   mysteriously fail to apply on one specific route while working
+   everywhere else** — confirmed on `/scheduled`: `data-theme` never got
+   set despite the bootstrap script being present, byte-identical to
+   working pages, localStorage correct, no console errors, across
+   repeated hard reloads. Switching to a plain synchronous `<script>` tag
+   in `<head>` (bypassing `next/script`'s queueing runtime entirely)
+   *didn't* fix it either — the real fix ended up being a defensive
+   `ThemeSync` client component (`components/ThemeSync.tsx`) that
+   re-asserts the saved theme after React mounts, on every page. The exact
+   root cause of the original failure was never identified.
+7. **Vercel's "Sensitive" env var type is write-only** — once saved, it
+   cannot be viewed again via the dashboard or `vercel env pull`, by
+   design. `TILLER_SYNC_SECRET` was created this way by the other AI
+   session; when it needed to be put into Apps Script's Script
+   Properties, it had to be rotated (new value generated, set in both
+   Vercel and Apps Script) rather than recovered.
+8. **Deploys are manual** (§2b) — `git push` alone does not deploy
+   `gm-money-web`. Always follow a code change with `vercel --prod` from
+   `gm-money-web/`.
+9. **`.next` can corrupt on this Windows/OneDrive setup** if a dev server
+   is running while a build also touches it — delete `.next` and rebuild
+   fresh if `next build`/`next dev` throws `EINVAL: invalid argument,
+   readlink`. Prefer `npx tsc --noEmit` for quick type-checks over a full
+   build when just verifying a small change.
 
 ---
 
 ## 6. Why HydraCloud's Supabase project specifically
 
-The owner has already used both of his free Supabase project slots (one
-for Skrybix, one for HydraCloud) and does not want to pay for a third. GM
-Money's new Postgres tables therefore live inside a **dedicated `gm_money`
-schema inside HydraCloud's existing Supabase project** (project ref
-`qptipjjribhwjjakmwjx`) — chosen over Skrybix's project when asked
-directly. A dedicated schema (not `public`) means GM Money's tables can
-never collide with HydraCloud's own `public.*` tables in the same project.
+Unchanged from the previous version: the owner had already used both free
+Supabase project slots (Skrybix, HydraCloud) and didn't want a third, so
+GM Money's tables live in a dedicated `gm_money` schema inside
+HydraCloud's existing project (ref `qptipjjribhwjjakmwjx`).
 
 ---
 
-## 7. Known bugs, blockers, and the immediate next step
+## 7. Known bugs, blockers, and what actually happened this session
 
-**RESOLVED, kept here for history**: the original schema-collision error
-(`relation "categories" already exists`) and the "gm_money not exposed"
-issue are both fully resolved — see §2b's pivot note. `gm_money` is
-exposed, `site_auth` exists with the correct grants, login/Dashboard/
-Register/Entry are all verified working against real data. No live
-blocker remains from that episode.
+**RESOLVED this session** (all confirmed live, not just code-reviewed):
+- The other AI's entire session of work existed only on disk / deployed
+  to Vercel, never committed to git — brought fully into version control.
+- Register duplicate-transaction risk from an un-idempotent
+  `/api/tiller-sync` route (would have inserted the same transaction
+  again every 15-minute sync) — fixed with upserts on a deterministic key.
+- The receiving endpoint swallowing real Postgres/PostgREST error
+  messages behind a generic "Sync failed" (PostgrestError objects aren't
+  `instanceof Error`) — fixed, which is what let the next two bugs
+  actually get diagnosed instead of staying mysterious.
+- Balance snapshot upserts colliding across accounts (§5.2).
+- A 60-day Tiller-sync lookback window silently repopulating 166 rows of
+  the transaction history that had just been deliberately purged — twice
+  (found, purged, recurred via the still-running trigger, found again,
+  fixed at the root by enforcing `CUTOFF_DATE` server-side in the route
+  itself rather than trusting the sender's window).
+- `transaction_matches.match_method` check constraint rejecting the
+  guessed value (§5.1).
+- The concurrent-Supabase-query silent-empty-result bug (§5.4).
+- The Recharts Pie animation bug (§5.5).
+- The Scheduled page theme bug (§5.6).
+- A hardcoded "Showing 2026-07-01 onward" string on the Dashboard that
+  never got updated when the cutoff moved to 07-19 — now reads from the
+  same exported constant everywhere.
+- The Expense Constellation pie chart's center label overlapping the
+  donut ring (the label was wider than the hole).
 
-**Currently no hard blocker** — the natural next step (Review, Settings,
-or the Tiller sync design) can start any time. The main open gap is that
-nothing keeps `gm_money`'s data fresh yet (no live Tiller sync built), so
-the data is a point-in-time snapshot, not live — not urgent as long as
-`gm-money-frontend`/`app-script-backend` remain the live system of
-record (§9), but worth prioritizing before too much new real activity
-happens in the old system that the new one won't see.
-
-### Other known issues, lower priority
-- `npm install` in `gm-money-web` surfaces 2 high-severity `npm audit`
-  findings — inherited from the same pinned Next.js 14.2.x version range
-  already used by Skrybix and HydraCloud (not introduced fresh here).
-  Fixing means bumping to Next.js 16 across all three sibling apps
-  consistently — a cross-cutting decision to raise with the owner
-  separately, not something to fix unilaterally mid-migration.
-- No Vercel project exists yet for `gm-money-web` — needs creating
-  (Root Directory = `gm-money-web`, same repo) once there's something
-  real worth previewing live, not urgent yet.
-
----
-
-## 8. Next concrete tasks, in order
-
-1. **Review screen** — the bank-fed transaction categorization queue
-   (`transactions` where `source='tiller' and category_id is null`,
-   same query already used for Dashboard's "Pending Review" count in
-   `lib/dashboard.ts` — reuse that filter). Approving one should also
-   handle the Tiller-Categories-sheet write-back requirement (§5.2) —
-   that part needs the Tiller sync mechanism (next item) to exist first,
-   or a temporary stub.
-2. **Design + build the ongoing Tiller sync mechanism**, reusing
-   `integration_sources`/`sync_runs`/`source_records` (the adopted
-   schema's own generic bank-sync framework) instead of the superseded
-   tiller_*-mirror-table plan in `docs/migration-plan.md`. This is the
-   biggest remaining architectural gap — nothing keeps the data fresh
-   right now.
-3. **Settings** (categories/payment-methods management, budgets) and
-   **Scheduled/recurring transactions** — both fairly mechanical CRUD
-   against tables that already exist and are understood
-   (`recurring_transactions`, `budgets`).
-4. **Merchant Memory** screen, porting the confidence-learning algorithm
-   (§5.4) against the adopted schema's `merchant_rules` table.
-5. Notification digest logic (port fully, sending stays stubbed per the
-   owner's "skip for now"), cron jobs (Vercel Cron, per
-   `docs/migration-plan.md` §5 for the exact config pattern — routes/
-   schedule still valid even though the underlying tables changed).
-6. Set up a Vercel project for `gm-money-web` (Root Directory =
-   `gm-money-web`, same repo) once there's a full enough app to be worth
-   previewing live.
-7. **Parallel-run verification window**, then the **actual cutover** —
-   requires the owner's explicit go-ahead, not autonomous (§9).
+**No open hard blocker.** The main things worth knowing before touching
+related code are listed in §5's numbered gotchas above.
 
 ---
 
-## 9. Cutover rule (do not skip this even under time pressure)
+## 8. Next concrete tasks (no fixed order — pick based on what the owner asks for)
 
-`gm-money-frontend` + `app-script-backend` stay fully intact and are what
-Phil and Crystal actually use for real bookkeeping, for the entire
-duration of this migration. Do not disable, break, or repoint them until:
-(a) `gm-money-web` has been run side-by-side (read-only comparison) against
-real data for a real verification window and matches line-for-line
-(especially Register's running balance — the single highest-regression-risk
-piece of logic being ported), AND (b) the owner has given an **explicit
-go-ahead** for the actual flip. This is the one step in the whole migration
-that is NOT meant to happen autonomously/without a check-in, regardless of
-how the rest of the work is paced.
+1. Decide the notification-email provider and wire up actual sending (the
+   compute/prefs side is done).
+2. Scope and build the retail pricing guide, if the owner comes back to it.
+3. Settle the open question in §9 (old system status) explicitly with the
+   owner rather than continuing to leave it ambiguous.
+4. Consider running `rebuildMerchantRules()` if merchant-memory
+   suggestions start feeling stale post-purge.
+5. Eventually: Next.js 16 bump (cross-sibling-app decision), a Reports
+   screen (unscoped), the two legacy Sheets-native bugs (gated on §9).
 
 ---
 
-## 10. Files, APIs, and config needed to continue — full reference list
+## 9. Open question this session raised: has the old system actually been retired?
 
-### Repo layout (this repo, `gm-money-webapp`)
+The original migration plan (`docs/migration-plan.md` — now largely
+historical/superseded, see the note at its top) called for an explicit
+parallel-run verification window and a deliberate owner go-ahead before
+cutting over from `gm-money-frontend`/`app-script-backend` to
+`gm-money-web`. **That formal step never happened** — but this entire
+session was Crystal and Phil actively using `gm-money-web` for real
+bookkeeping (entering transactions, hitting real bugs, confirming
+reconciliation matches) with no indication they're also still using the
+old Sheets UI in parallel. Functionally, the cutover appears to have
+already happened in practice. Worth confirming explicitly with the owner:
+is the old system still needed as a fallback, or is it safe to start
+thinking about the cleanup phase (trimming `app-script-backend` to just
+`TillerSync.gs`, eventually retiring `gm-money-frontend`)? Don't assume
+either way — ask.
+
+---
+
+## 10. Files, APIs, and config — reference list
+
+### Repo layout
 ```
-CLAUDE.md                          -- project charter: philosophy, full data model, design language, AI direction. READ THIS FIRST for anything not covered here.
+CLAUDE.md                          -- project charter, read first for anything not covered here
+AGENTS.md                          -- the other AI's (Codex) mirror of CLAUDE.md -- keep in sync if editing either
 HANDOFF.md                         -- this file
-gm-money-frontend/                 -- OLD live frontend (Vite+React), DO NOT BREAK
-  src/api/client.ts                -- callApi()/ApiResult<T> — the old API contract
-  src/styles/theme.css             -- design tokens, source of truth (copied into gm-money-web/app/globals.css)
-  src/layout/Sidebar.tsx           -- sidebar shell (port into gm-money-web later)
-  src/features/dashboard/DashboardView.tsx
-  src/features/transaction-entry/CategoryPicker.tsx  -- the new nested picker
-  src/features/*/                 -- one folder per screen (register, review, scheduled, merchant-memory, settings)
-app-script-backend/                -- OLD live backend (Apps Script), DO NOT BREAK
-  Api.gs                           -- single doPost dispatch point, 35 actions, START HERE for porting any logic
-  Register.gs                     -- the running-balance algorithm (lines 399-610)
-  Settings.gs                     -- the column-range Settings sheet logic being replaced
-  MerchantMemory.gs               -- confidence-learning algorithm
-  Automation.gs                   -- scheduled-transaction daily generator
-  Transactions.gs                 -- Tiller category-registration write-back logic
-gm-money-web/                      -- NEW system, in progress
-  supabase/schema.sql              -- documents the REAL adopted schema (reverse-engineered), not a script to re-run
-  lib/supabase.ts                  -- Supabase client scoped to gm_money schema + getBusinessId()
-  lib/session.ts, lib/site-auth-db.ts, middleware.ts  -- auth (ported from skrybix-webapp)
-  lib/dashboard.ts                 -- Dashboard queries (balances, income/expense, pending review/uncleared)
-  lib/register.ts                  -- Register: running-balance algorithm + manual/bank dedup heuristic
-  lib/categories.ts                -- reshapes the parent_id-hierarchy categories table into {type, categories:[{subcategories}]}
-  components/Sidebar.tsx           -- minimal port, expand NAV_ITEMS as more screens land
-  components/CategoryPicker.tsx    -- nested Income/Expense picker, adapted for uuid category/subcategory ids
-  components/EntryForm.tsx         -- client component wrapping CategoryPicker + the rest of the entry form
-  app/page.tsx                     -- real Dashboard
-  app/register/page.tsx            -- real Register (account switcher via ?account=<uuid>)
-  app/entry/{page,actions}.tsx     -- real Entry (Server Action does the insert + category-type/sign validation)
-  app/login/, app/settings/password/  -- login + change-password pages
-  scripts/seed-site-auth.mjs        -- one-time first-password bootstrap (already run — password given to owner once)
-  .env.local                       -- SECRETS, gitignored, not in this handoff — see below
+docs/migration-plan.md             -- the ORIGINAL migration plan; schema/Tiller-sync sections superseded, auth/cron-mechanics sections still roughly apply. Treat HANDOFF.md as authoritative where they conflict.
+gm-money-frontend/                 -- OLD frontend (Vite+React) -- status per §9, don't assume retired or live
+app-script-backend/                -- OLD backend (Apps Script) -- same caveat; now also home to TillerSync.gs (still active, needed regardless of §9)
+  TillerSync.gs                    -- pushes to gm-money-web's /api/tiller-sync every 15 min
+gm-money-web/                      -- the live system, gm-money-web.vercel.app
+  supabase/schema.sql              -- documents the adopted schema (not a script to re-run)
+  supabase/migrations/             -- every additive SQL change made on top of the adopted schema, in order
+  lib/supabase.ts                  -- Supabase client (schema-scoped, forces cache:"no-store" -- see §5.4) + getBusinessId()
+  lib/register.ts                  -- running balance + dedup + effectiveStatus (§5.3)
+  lib/scheduled.ts                 -- recurring-transaction generation
+  lib/advisor.ts, lib/ai-advisor.ts -- Co-CFO Insights (free) / Ask GM Money (real OpenAI call)
+  lib/lite.ts                      -- minimal balance query for /lite
+  app/api/tiller-sync/route.ts     -- the sync receiving endpoint (§5.2, §7)
+  app/api/cron/route.ts            -- daily Vercel Cron (scheduled autopost + review count)
+  app/lite/page.tsx                -- PWA mobile view
+  app/manifest.ts, app/icon.png, app/apple-icon.png -- PWA assets
+  components/ThemeSync.tsx         -- defensive theme re-sync (§5.6)
+  components/MatchToBankButton.tsx -- Register reconciliation UI
+  components/DashboardCharts.tsx   -- cashflow + pie charts (§5.5)
+  .env.local                       -- SECRETS, gitignored, not reproduced here
 ```
 
-### Sibling repos referenced as patterns (read, don't modify unless asked)
+### Deploying (manual, every time)
 ```
-C:\Users\pwach\OneDrive\Desktop\skrybix-webapp\lib\session.ts           -- auth pattern source
-C:\Users\pwach\OneDrive\Desktop\skrybix-webapp\lib\site-auth-db.ts
-C:\Users\pwach\OneDrive\Desktop\skrybix-webapp\middleware.ts
-C:\Users\pwach\OneDrive\Desktop\skrybix-webapp\supabase\schema.sql       -- schema-file convention (hand-applied, no migration tool)
-C:\Users\pwach\OneDrive\Desktop\skrybix-webapp\scripts\import-sheets-data.mjs  -- CSV-import pattern to replicate for GM Money's own migration script
-C:\Users\pwach\OneDrive\Desktop\gathering-moss-marketplace\              -- private repo, the visual-design reference the whole 2026-07-25 reskin was modeled on
+git add -A && git commit -m "..." && git push origin main
+cd gm-money-web && npx vercel --prod
 ```
 
-### Required environment variables (already set in `gm-money-web/.env.local`, gitignored — not reproduced here since they're secrets; if this file is ever missing, regenerate per below)
-- `SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY` — HydraCloud's Supabase
-  project (Settings → API in that project's dashboard has both).
-- `AUTH_SECRET` — any long random string, used to sign session cookies.
-- `CRON_SECRET` — any long random string, checked by the cron API routes.
-- `TILLER_SYNC_SECRET` — any long random string, checked by `/api/tiller-sync`
-  (route not built yet).
+### Required environment variables
+Same list as before (`SUPABASE_URL`, `SUPABASE_SERVICE_ROLE_KEY`,
+`AUTH_SECRET`, `CRON_SECRET`, `TILLER_SYNC_SECRET`), plus now
+`OPENAI_API_KEY`/`OPENAI_MODEL` for the Ask GM Money feature. All are set
+in both `.env.local` (local dev) and Vercel Production. `TILLER_SYNC_SECRET`
+is also set in the Apps Script project's Script Properties (Project
+Settings → Script Properties in the Apps Script editor) — it must match
+the Vercel value exactly, and if it's ever rotated, both sides need
+updating (§5.7).
 
-### External accounts/access needed to continue this work
-- **Supabase dashboard access** (HydraCloud project) — for schema
-  application, exposed-schema settings, and eventually checking real
-  capacity/usage. No AI agent has direct dashboard login; these steps
-  need the owner.
-- **Vercel account** ("Gathering Moss" team) — already used for
-  `gm-money-frontend`; a new project will be needed for `gm-money-web`
-  eventually (Root Directory = `gm-money-web`).
-- **Google Apps Script project** (`app-script-backend`) — `clasp` is
-  already authenticated on this machine (tied to
-  gatheringmossphil@gmail.com), so redeploys don't need dashboard
-  clicking.
-- **The real Google Sheet + Tiller** — this is the actual live bookkeeping
-  data; the migration script (not yet built) will need real CSV exports
-  from it (File → Download → CSV per tab), done manually by the owner.
-
-### Outstanding assumptions / open questions nobody has answered yet
-1. Whether raw-Sheets-UI access matters post-cutover (affects whether the
-   two known legacy Sheets bugs are worth fixing there too).
-2. Which email-sending provider to use once "skip for now" is revisited.
-3. Exact timing/cadence the owner wants for the parallel-run verification
-   window before cutover (not yet discussed — "a few days" was the plan's
-   own suggestion, not confirmed with the owner).
-4. Whether the Next.js 14 → 16 version bump (to clear the npm audit
-   findings) should happen across all three sibling apps together, and if
-   so, when.
-
----
-
-## 11. Where the full detailed migration plan lives (important)
-
-The complete phase-by-phase plan (exact schema DDL, exact Tiller-sync
-design, exact business-logic porting table, exact cron job config, exact
-cutover steps) was written and approved this session. It originated at
-`C:\Users\pwach\.claude\plans\moonlit-percolating-lark.md` (Claude Code's
-own local plan storage, not visible to a fresh session/different
-machine/different tool) and has now been **copied into this repo at
-[`docs/migration-plan.md`](docs/migration-plan.md)** specifically so it
-survives independent of any AI session or tool. That file is the most
-granular reference (exact SQL, exact Vercel Cron JSON) — this HANDOFF.md
-is the higher-level summary; `docs/migration-plan.md` is the detailed
-execution reference underneath it.
+### External accounts/access needed to continue
+Same as before: Supabase dashboard (HydraCloud project), Vercel account
+("Gathering Moss" team, project `gm-money-web`), the Apps Script project
+(`clasp` already authenticated on this machine), the real Google
+Sheet + Tiller.

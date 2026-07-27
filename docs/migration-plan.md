@@ -1,5 +1,17 @@
 # GM Money: migrate off Apps Script/Sheets onto Next.js + Supabase
 
+> **Superseded as of 2026-07-27 — read `HANDOFF.md` first, not this file.**
+> This was the original plan, written before it was discovered that a
+> different AI session had already built and populated a real schema
+> directly in Supabase. The schema DDL and Tiller-sync design below (§
+> "Postgres schema" and § "Tiller sync") were never applied — the actual
+> adopted schema is documented in `gm-money-web/supabase/schema.sql`, and
+> the real, working Tiller sync is `app-script-backend/TillerSync.gs` +
+> `gm-money-web/app/api/tiller-sync/route.ts`, not what's described here.
+> The auth pattern, general phase structure, and cron-job mechanics below
+> are still roughly what was actually built. Kept as a historical record
+> of the original thinking, not a current reference.
+
 ## Context
 
 GM Money's current architecture (Vite+React frontend calling a Google Apps

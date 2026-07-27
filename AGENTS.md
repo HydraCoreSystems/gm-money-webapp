@@ -50,19 +50,18 @@ category structure.
   when the owner has budget for something more robust — he was clear this
   is a "for now, until finances allow more" choice, not a permanent
   ceiling.
-- **Auth:** a single shared password was chosen as a pragmatic **first
-  step**, not a permanent ceiling — the owner was explicit (2026-07-21)
-  that this was never meant to be a "this is how it'll always be done"
-  decision. **Eventual target: real independent user accounts that share
-  the same underlying data, with definable roles per person** (Phil/
-  Crystal today, potentially more later). Treat this as its own future
-  milestone to scope properly when the owner is ready, not as something
-  permanently settled — don't cite "simple password protection is the
-  decision" as a reason to push back on building real accounts later.
-  Until that migration happens, the current rule still holds: the
-  password must be checked **server-side by Apps Script on every
-  request**, not just gated by a frontend lock screen — a frontend-only
-  gate would be trivially bypassed by hitting the API URL directly.
+- **Auth:** a single shared password was the original **first step** on
+  the Sheets-native app, not a permanent ceiling — the owner was explicit
+  (2026-07-21) that this was never meant to be a "this is how it'll
+  always be done" decision. **Update (2026-07-27): the eventual target —
+  real independent user accounts, self-registered, with definable roles
+  per person — has actually been built and is live in `gm-money-web`**
+  (`gm_money.app_users`, bcrypt, `/setup` self-registers the first owner
+  account, `/settings/users` adds more). See `HANDOFF.md` for the current
+  state. The original Sheets-native `app-script-backend` still checks a
+  single shared password server-side (unchanged, still correct for that
+  system) — this note is about the new web app only, not a claim that the
+  old system was also upgraded.
 
 ## First milestone (build this first, get it feeling real before expanding)
 
