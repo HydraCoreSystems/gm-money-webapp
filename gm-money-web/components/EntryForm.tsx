@@ -94,17 +94,7 @@ export function EntryForm({
       className="gm-card gm-card--wide"
       style={{ maxWidth: 900, margin: "0 auto" }}
     >
-      <div className="gm-section-heading" style={{ padding: "26px 30px 0" }}>
-        <div className="gm-section-icon" style={{ width: 30, height: 30, borderRadius: 9, display: "grid", placeItems: "center", background: "var(--sage-tint)", color: "var(--forest)", fontWeight: 700 }}>
-          $
-        </div>
-        <div>
-          <h2>What happened?</h2>
-          <p>The category you choose below decides Income or Expense automatically -- it's never a separate field.</p>
-        </div>
-      </div>
-
-      <div style={{ padding: "0 30px 30px" }}>
+      <div style={{ padding: "26px 30px 30px" }}>
         {error && <p className="gm-error">{error}</p>}
         {status === "success" && <p className="gm-success">Saved.</p>}
         {notice && <p className="gm-register-note" style={{ marginTop: 0 }}>{notice}</p>}
