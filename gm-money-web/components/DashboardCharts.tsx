@@ -161,11 +161,10 @@ export function DashboardCharts({ cashflowSeries, spendingByCategory }: Props) {
                       cx="50%"
                       cy="50%"
                       outerRadius={86}
-                      innerRadius={48}
+                      innerRadius={66}
                       paddingAngle={2}
                       isAnimationActive
                       animationDuration={1100}
-                      onMouseEnter={(_, index) => setActiveSlice(index)}
                     >
                       {spendingByCategory.map((entry, idx) => {
                         const active = idx === activeSlice;
@@ -175,7 +174,9 @@ export function DashboardCharts({ cashflowSeries, spendingByCategory }: Props) {
                             fill={PIE_COLORS[idx % PIE_COLORS.length]}
                             stroke={active ? "#f4f8f3" : "transparent"}
                             strokeWidth={active ? 3 : 1}
-                            opacity={active ? 1 : 0.78}
+                            opacity={active ? 1 : 0.4}
+                            style={{ transition: "opacity 150ms ease, stroke-width 150ms ease", cursor: "pointer" }}
+                            onMouseEnter={() => setActiveSlice(idx)}
                           />
                         );
                       })}
@@ -191,7 +192,13 @@ export function DashboardCharts({ cashflowSeries, spendingByCategory }: Props) {
               <ul className="gm-dashboard-pie-legend" aria-label="Expense category breakdown">
                 {spendingByCategory.map((entry, idx) => (
                   <li key={entry.category}>
-                    <button type="button" onMouseEnter={() => setActiveSlice(idx)} onFocus={() => setActiveSlice(idx)}>
+                    <button
+                      type="button"
+                      className={idx === activeSlice ? "gm-dashboard-pie-legend__row--active" : undefined}
+                      style={idx === activeSlice ? { borderColor: PIE_COLORS[idx % PIE_COLORS.length] } : undefined}
+                      onMouseEnter={() => setActiveSlice(idx)}
+                      onFocus={() => setActiveSlice(idx)}
+                    >
                       <span className="gm-dashboard-pie-dot" style={{ background: PIE_COLORS[idx % PIE_COLORS.length] }} aria-hidden="true" />
                       <span className="gm-dashboard-pie-label">{entry.category}</span>
                       <span className="gm-dashboard-pie-value">{percentOfTotal(entry.amount)}</span>

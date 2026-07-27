@@ -9,7 +9,7 @@ import { processDueScheduledTransactions } from "./scheduled";
 // reappear (e.g. a stale Tiller row synced late). This does NOT affect
 // account balances (those are real point-in-time snapshots, unaffected by
 // which transactions we choose to display).
-const CUTOFF_DATE = "2026-07-19";
+export const CUTOFF_DATE = "2026-07-19";
 const CHART_DAY_WINDOW = 30;
 
 // Floored at CUTOFF_DATE, same pattern as chartWindowStart() below --

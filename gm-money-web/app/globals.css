@@ -1389,19 +1389,21 @@ h3 {
 }
 
 .gm-dashboard-pie-center {
+  /* Sized to sit inside the donut's hole (innerRadius 66 => 132px
+     diameter below), not overlap the ring -- this used to be 124px wide
+     against a 96px hole, genuinely covering part of the chart. */
   pointer-events: none;
   position: absolute;
   left: 50%;
   top: 50%;
   transform: translate(-50%, -50%);
-  width: 124px;
+  width: 112px;
   text-align: center;
   border-radius: 999px;
-  padding: 8px 10px;
-  background: linear-gradient(160deg, rgba(255, 255, 255, 0.92), rgba(240, 246, 238, 0.9));
-  border: 1px solid rgba(93, 123, 104, 0.2);
+  padding: 6px 8px;
+  background: var(--surface);
+  border: 1px solid var(--line);
   box-shadow: 0 7px 16px rgba(21, 51, 35, 0.08);
-  backdrop-filter: blur(2px);
 }
 
 .gm-dashboard-pie-center span {
@@ -1422,7 +1424,7 @@ h3 {
 .gm-dashboard-pie-center em {
   display: block;
   margin-top: 3px;
-  color: #547461;
+  color: var(--forest);
   font-style: normal;
   font-size: 10px;
   white-space: nowrap;
@@ -1445,7 +1447,7 @@ h3 {
 .gm-dashboard-pie-legend button {
   width: 100%;
   border: 1px solid var(--line);
-  background: rgba(255, 255, 255, 0.72);
+  background: var(--surface);
   border-radius: 10px;
   padding: 6px 8px;
   display: grid;
@@ -1457,7 +1459,17 @@ h3 {
 }
 
 .gm-dashboard-pie-legend button:hover {
-  background: rgba(240, 248, 243, 0.95);
+  background: var(--sage-tint);
+}
+
+.gm-dashboard-pie-legend__row--active {
+  background: var(--sage-tint) !important;
+  border-width: 2px !important;
+  font-weight: 600;
+}
+
+.gm-dashboard-pie-legend__row--active .gm-dashboard-pie-label {
+  color: var(--ink);
 }
 
 .gm-dashboard-pie-dot {

@@ -1,4 +1,4 @@
-import { getDashboardData } from "@/lib/dashboard";
+import { getDashboardData, CUTOFF_DATE } from "@/lib/dashboard";
 import { Sidebar } from "@/components/Sidebar";
 import { DashboardCharts } from "@/components/DashboardCharts";
 import { buildAdvisorBrief } from "@/lib/advisor";
@@ -126,7 +126,7 @@ export default async function HomePage() {
               <div className="gm-panel-head" style={{ display: "flex", justifyContent: "space-between", padding: "20px 22px 14px" }}>
                 <h2 style={{ margin: 0, fontSize: 17 }}>Recent Activity</h2>
                 <span className="gm-register-note" style={{ margin: 0 }}>
-                  Showing 2026-07-01 onward
+                  Showing {CUTOFF_DATE} onward
                 </span>
               </div>
               <div className="gm-register-list" style={{ padding: "0 22px 22px" }}>
