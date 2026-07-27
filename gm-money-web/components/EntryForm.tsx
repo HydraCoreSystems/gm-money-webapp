@@ -162,7 +162,13 @@ export function EntryForm({
           </div>
           <div className="gm-field">
             <label htmlFor="paymentMethod">Payment Method</label>
-            <input id="paymentMethod" list="payment-methods" name="paymentMethod" />
+            <input
+              id="paymentMethod"
+              list="payment-methods"
+              name="paymentMethod"
+              defaultValue="Debit Card"
+              autoComplete="off"
+            />
             <datalist id="payment-methods">
               {PAYMENT_METHODS.map((m) => (
                 <option key={m} value={m} />
