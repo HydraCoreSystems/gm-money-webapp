@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from "next";
 import { Inter } from "next/font/google";
+import { ThemeSync } from "@/components/ThemeSync";
 import "./globals.css";
 
 // Plain, synchronous inline script rather than next/script's
@@ -63,7 +64,10 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <head>
         <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }} />
       </head>
-      <body className={inter.className}>{children}</body>
+      <body className={inter.className}>
+        <ThemeSync />
+        {children}
+      </body>
     </html>
   );
 }
