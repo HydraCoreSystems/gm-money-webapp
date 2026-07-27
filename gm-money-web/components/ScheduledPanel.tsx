@@ -356,6 +356,7 @@ export function ScheduledPanel({ categoryGroups, accounts, initialItems }: Props
                   }
                   onClick={() => setSelectedDate(key)}
                 >
+                  {dayItems.length > 0 && <span className="gm-scheduled-calendar__day-dot" aria-hidden="true" />}
                   <strong>{day.getDate()}</strong>
                   {isToday && <small>Today</small>}
                   {dayItems.length > 0 && <em>{dayItems.length} due</em>}

@@ -1,7 +1,35 @@
 import type { Metadata, Viewport } from "next";
-import Script from "next/script";
 import { Inter } from "next/font/google";
 import "./globals.css";
+
+// Plain, synchronous inline script rather than next/script's
+// beforeInteractive strategy -- confirmed live that beforeInteractive
+// reliably failed to apply data-theme on /scheduled specifically (script
+// content verified byte-identical to working pages, localStorage
+// verified correct, no console errors -- it just silently never ran or
+// never took effect on that route, across repeated hard reloads). A raw
+// <script> in <head> executes synchronously in document order with no
+// dependency on Next's own script-queueing runtime, which sidesteps
+// whatever route-specific quirk that was.
+const THEME_BOOTSTRAP_SCRIPT = `
+(() => {
+  try {
+    const storageKey = 'gm-money-theme';
+    const savedTheme = window.localStorage.getItem(storageKey);
+    const theme = savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system'
+      ? savedTheme
+      : 'system';
+
+    if (theme === 'system') {
+      document.documentElement.removeAttribute('data-theme');
+    } else {
+      document.documentElement.setAttribute('data-theme', theme);
+    }
+  } catch {
+    document.documentElement.removeAttribute('data-theme');
+  }
+})();
+`;
 
 // next/font self-hosts Inter at build time -- same font as the Vite app's
 // Google Fonts <link>, but no runtime request to fonts.googleapis.com.
@@ -33,25 +61,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
-        <Script id="gm-money-theme-bootstrap" strategy="beforeInteractive">{`
-          (() => {
-            try {
-              const storageKey = 'gm-money-theme';
-              const savedTheme = window.localStorage.getItem(storageKey);
-              const theme = savedTheme === 'light' || savedTheme === 'dark' || savedTheme === 'system'
-                ? savedTheme
-                : 'system';
-
-              if (theme === 'system') {
-                document.documentElement.removeAttribute('data-theme');
-              } else {
-                document.documentElement.setAttribute('data-theme', theme);
-              }
-            } catch {
-              document.documentElement.removeAttribute('data-theme');
-            }
-          })();
-        `}</Script>
+        <script dangerouslySetInnerHTML={{ __html: THEME_BOOTSTRAP_SCRIPT }} />
       </head>
       <body className={inter.className}>{children}</body>
     </html>

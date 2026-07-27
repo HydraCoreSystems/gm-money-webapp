@@ -1764,7 +1764,7 @@ h3 {
   border: 1px solid var(--line);
   border-radius: 14px;
   padding: 14px;
-  background: linear-gradient(180deg, rgba(255, 255, 255, 0.8), rgba(237, 244, 236, 0.45));
+  background: var(--sage-tint);
 }
 
 .gm-scheduled-calendar__head {
@@ -1802,6 +1802,7 @@ h3 {
 }
 
 .gm-scheduled-calendar__day {
+  position: relative;
   min-height: 66px;
   border: 1px solid var(--line);
   border-radius: 10px;
@@ -1824,7 +1825,7 @@ h3 {
 }
 
 .gm-scheduled-calendar__day em {
-  color: #2d5d45;
+  color: var(--forest);
   font-size: 10px;
   font-style: normal;
 }
@@ -1834,8 +1835,22 @@ h3 {
 }
 
 .gm-scheduled-calendar__day--selected {
-  border-color: #2d5d45;
-  box-shadow: 0 0 0 2px rgba(45, 93, 69, 0.13);
+  border-color: var(--forest);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--forest) 20%, transparent);
+}
+
+/* A dot in the corner reads at a glance, before you've even focused on
+   the day's text -- the "N due" label alone was easy to miss scanning a
+   full month. */
+.gm-scheduled-calendar__day-dot {
+  position: absolute;
+  top: 6px;
+  right: 7px;
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background: var(--forest);
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--forest) 25%, transparent);
 }
 
 .gm-scheduled-calendar__agenda {
@@ -1855,8 +1870,8 @@ h3 {
   gap: 10px;
   padding: 7px 8px;
   border-radius: 8px;
-  background: rgba(255, 255, 255, 0.72);
-  border: 1px solid rgba(45, 93, 69, 0.14);
+  background: var(--surface);
+  border: 1px solid var(--line);
   margin-top: 6px;
 }
 
