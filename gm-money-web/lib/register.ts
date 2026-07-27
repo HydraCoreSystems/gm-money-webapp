@@ -138,17 +138,26 @@ export async function getRegisterData(accountId?: string): Promise<RegisterData>
 
   const account = accountId ? accounts.find((a) => a.id === accountId) ?? accounts[0] : accounts[0];
 
-  const [{ data: snapshot, error: snapshotError }, { data: matches, error: matchesError }] = await Promise.all([
-    supabase
-      .from("account_balance_snapshots")
-      .select("balance")
-      .eq("account_id", account.id)
-      .order("balance_date", { ascending: false })
-      .limit(1)
-      .maybeSingle(),
-    supabase.from("transaction_matches").select("manual_transaction_id, bank_transaction_id").eq("business_id", businessId),
-  ]);
+  // These two ran concurrently via Promise.all() before -- confirmed live
+  // (side-by-side against a raw fetch() to the identical endpoint in the
+  // same execution) that firing two queries at once from the same
+  // supabase-js client instance could silently return an empty result for
+  // one of them, no error, nothing to catch. Sequential awaits below cost
+  // one extra round trip but were confirmed to reliably return the real
+  // data -- worth it for reconciliation state on real financial records.
+  const { data: snapshot, error: snapshotError } = await supabase
+    .from("account_balance_snapshots")
+    .select("balance")
+    .eq("account_id", account.id)
+    .order("balance_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
   if (snapshotError) throw new Error(snapshotError.message);
+
+  const { data: matches, error: matchesError } = await supabase
+    .from("transaction_matches")
+    .select("manual_transaction_id, bank_transaction_id")
+    .eq("business_id", businessId);
   if (matchesError) throw new Error(matchesError.message);
 
   const currentBalance = Number(snapshot?.balance ?? 0);
