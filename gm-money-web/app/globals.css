@@ -157,10 +157,27 @@ h3 {
 ============================================================ */
 
 .gm-standalone {
+  position: relative;
   min-height: 100vh;
   display: flex;
+  align-items: center;
   justify-content: center;
   padding: 2.5rem 1.25rem;
+  background:
+    radial-gradient(60% 50% at 50% 0%, rgba(214, 162, 51, 0.1), transparent 60%),
+    radial-gradient(80% 60% at 50% 100%, rgba(31, 157, 92, 0.12), transparent 60%);
+}
+
+.gm-standalone .gm-card {
+  animation: gm-card-rise 420ms ease-out both;
+  box-shadow: 0 24px 48px -20px rgba(15, 35, 24, 0.28), var(--shadow-card);
+}
+
+.gm-standalone .gm-brand-mark {
+  width: 48px;
+  height: 48px;
+  border-radius: 14px;
+  font-size: 16px;
 }
 
 .gm-workspace-notice {
@@ -241,7 +258,10 @@ h3 {
   flex-direction: column;
   padding: 28px 18px 20px;
   color: #eef5ec;
-  background: linear-gradient(175deg, var(--forest-deep) 0%, var(--forest-darker) 72%, #0a1a15 100%);
+  background:
+    radial-gradient(120% 60% at 15% 0%, rgba(214, 162, 51, 0.14), transparent 55%),
+    radial-gradient(140% 80% at 100% 15%, rgba(31, 157, 92, 0.16), transparent 50%),
+    linear-gradient(175deg, var(--forest-deep) 0%, var(--forest-darker) 72%, #0a1a15 100%);
 }
 
 .gm-brand-lockup {
@@ -259,11 +279,11 @@ h3 {
   display: grid;
   place-items: center;
   border: 1px solid #89a78c;
-  background: #315843;
+  background: linear-gradient(135deg, #3d7a56, #315843 60%, #1e3d2b);
   color: #fff;
   font-family: var(--font-display);
   font-size: 13px;
-  box-shadow: inset 0 0 0 3px #254a38;
+  box-shadow: inset 0 0 0 3px #254a38, 0 4px 12px -2px rgba(214, 162, 51, 0.35);
 }
 
 .gm-brand-lockup strong {
@@ -288,6 +308,7 @@ h3 {
 }
 
 .gm-sidebar-nav__item {
+  position: relative;
   display: flex;
   align-items: center;
   gap: 12px;
@@ -301,7 +322,7 @@ h3 {
   font-size: 13px;
   font-family: var(--font-body);
   text-decoration: none;
-  transition: background 0.15s ease, color 0.15s ease;
+  transition: background 0.15s ease, color 0.15s ease, transform 0.15s ease;
 }
 
 .gm-sidebar-nav__item .gm-nav-ic {
@@ -311,15 +332,32 @@ h3 {
 }
 
 .gm-sidebar-nav__item:hover {
-  background: rgba(255, 255, 255, 0.05);
+  background: rgba(255, 255, 255, 0.07);
   color: #fff;
+  transform: translateX(2px);
 }
 
 .gm-sidebar-nav__item--active {
-  background: #e3ecdf;
+  background: linear-gradient(135deg, #f2f7ee, #e3ecdf 65%, #d6e3d0);
   color: #17372a;
   font-weight: 700;
-  box-shadow: 0 7px 18px rgba(7, 24, 16, 0.25);
+  box-shadow: 0 7px 18px rgba(7, 24, 16, 0.3);
+}
+
+.gm-sidebar-nav__item--active::before {
+  content: "";
+  position: absolute;
+  left: 2px;
+  top: 50%;
+  transform: translateY(-50%);
+  width: 3px;
+  height: 20px;
+  border-radius: 3px;
+  background: linear-gradient(180deg, #d6a233, #1f9d5c);
+}
+
+.gm-sidebar-nav__item--active:hover {
+  transform: none;
 }
 
 .gm-sidebar-spacer {
@@ -425,9 +463,11 @@ h3 {
 ============================================================ */
 
 .gm-button {
+  position: relative;
+  overflow: hidden;
   width: 100%;
   padding: 0.75rem 1rem;
-  background: var(--forest);
+  background: linear-gradient(135deg, #256b41, var(--forest) 55%, #1a4a30);
   color: #fff;
   border: none;
   border-radius: var(--radius);
@@ -438,8 +478,8 @@ h3 {
 }
 
 .gm-button--glow {
-  background: linear-gradient(135deg, #2d5d45, #4f7657);
-  box-shadow: 0 8px 18px -6px rgba(35, 77, 58, 0.45);
+  background: linear-gradient(135deg, #2f7a4c, #1f5a36 55%, #143d24);
+  box-shadow: 0 10px 24px -8px rgba(20, 61, 36, 0.55);
 }
 
 .gm-button:disabled {
@@ -449,7 +489,9 @@ h3 {
 }
 
 .gm-button:not(:disabled):hover {
-  filter: brightness(1.08);
+  filter: brightness(1.1);
+  box-shadow: 0 10px 22px -6px rgba(23, 55, 42, 0.5);
+  transform: translateY(-1px);
 }
 
 .gm-button:not(:disabled):active {
@@ -480,7 +522,10 @@ h3 {
 .gm-card {
   width: 100%;
   max-width: 480px;
-  background: var(--surface);
+  background:
+    radial-gradient(140% 90% at 100% -20%, rgba(31, 157, 92, 0.08), transparent 45%),
+    radial-gradient(130% 100% at -10% 115%, rgba(214, 162, 51, 0.06), transparent 42%),
+    var(--surface);
   border: 1px solid var(--line);
   border-radius: var(--radius-card);
   box-shadow: var(--shadow-card);
@@ -589,11 +634,11 @@ h3 {
 }
 
 .gm-who-picker button.gm-who-picker__selected {
-  background: var(--forest);
+  background: linear-gradient(135deg, #2f7a4c, var(--forest) 60%, #163d26);
   border-color: transparent;
   color: #fff;
   font-weight: 600;
-  box-shadow: 0 6px 14px -6px rgba(23, 55, 42, 0.45);
+  box-shadow: 0 6px 16px -6px rgba(23, 55, 42, 0.5);
 }
 
 .gm-link-button {
@@ -1111,6 +1156,7 @@ h3 {
   padding: 0.22rem 0.55rem;
   border-radius: 999px;
   white-space: nowrap;
+  box-shadow: inset 0 0 0 1px currentColor;
 }
 
 .gm-status-badge--uncleared {
