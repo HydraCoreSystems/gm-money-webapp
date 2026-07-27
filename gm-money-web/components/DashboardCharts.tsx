@@ -21,7 +21,27 @@ type Props = {
   spendingByCategory: DashboardData["spendingByCategory"];
 };
 
-const PIE_COLORS = ["#1f5a36", "#2e7048", "#8a5a22", "#4c6f5a", "#9b6f34", "#6a8e77"];
+// Real jewel-tone hue separation (green, gold, terracotta, teal, berry,
+// plum) -- the old palette was six shades of the same muted green/olive,
+// which is exactly why slices were hard to tell apart at a glance. Each
+// has a light/base pair for a glossy gradient fill rather than a flat
+// swatch.
+const PIE_COLORS = [
+  { base: "#1F6B3F", light: "#45A873" },
+  { base: "#D6A233", light: "#F2C968" },
+  { base: "#C1552F", light: "#E88A5D" },
+  { base: "#12798A", light: "#42BACB" },
+  { base: "#9C2E52", light: "#D06C8E" },
+  { base: "#5B4A9E", light: "#8F7FD1" },
+];
+
+function pieColor(idx: number): string {
+  return PIE_COLORS[idx % PIE_COLORS.length].base;
+}
+
+function pieGradientId(idx: number): string {
+  return `pieSliceGradient-${idx % PIE_COLORS.length}`;
+}
 
 function formatCompactMoney(amount: number): string {
   return `$${Math.round(amount).toLocaleString()}`;
@@ -74,16 +94,16 @@ export function DashboardCharts({ cashflowSeries, spendingByCategory }: Props) {
                 <AreaChart data={cashflowSeries} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                   <defs>
                     <linearGradient id="incomeFill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#3f8d60" stopOpacity={0.35} />
-                      <stop offset="100%" stopColor="#3f8d60" stopOpacity={0.02} />
+                      <stop offset="0%" stopColor="#1F9D5C" stopOpacity={0.55} />
+                      <stop offset="100%" stopColor="#1F9D5C" stopOpacity={0.03} />
                     </linearGradient>
                     <linearGradient id="expenseFill" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="0%" stopColor="#c65e56" stopOpacity={0.28} />
-                      <stop offset="100%" stopColor="#c65e56" stopOpacity={0.02} />
+                      <stop offset="0%" stopColor="#D8543F" stopOpacity={0.45} />
+                      <stop offset="100%" stopColor="#D8543F" stopOpacity={0.03} />
                     </linearGradient>
                     <linearGradient id="netStroke" x1="0" y1="0" x2="1" y2="0">
-                      <stop offset="0%" stopColor="#c38f41" />
-                      <stop offset="100%" stopColor="#8d5d1d" />
+                      <stop offset="0%" stopColor="#E8B23D" />
+                      <stop offset="100%" stopColor="#B3691A" />
                     </linearGradient>
                   </defs>
                   <CartesianGrid strokeDasharray="3 3" stroke="var(--line)" />
@@ -100,9 +120,9 @@ export function DashboardCharts({ cashflowSeries, spendingByCategory }: Props) {
                   <Area
                     type="monotone"
                     dataKey="income"
-                    stroke="#3f8d60"
+                    stroke="#1F9D5C"
                     fill="url(#incomeFill)"
-                    strokeWidth={2.25}
+                    strokeWidth={2.75}
                     isAnimationActive
                     animationDuration={950}
                     animationEasing="ease-out"
@@ -110,9 +130,9 @@ export function DashboardCharts({ cashflowSeries, spendingByCategory }: Props) {
                   <Area
                     type="monotone"
                     dataKey="expense"
-                    stroke="#c65e56"
+                    stroke="#D8543F"
                     fill="url(#expenseFill)"
-                    strokeWidth={2.25}
+                    strokeWidth={2.75}
                     isAnimationActive
                     animationBegin={130}
                     animationDuration={950}
@@ -154,6 +174,17 @@ export function DashboardCharts({ cashflowSeries, spendingByCategory }: Props) {
               <div className="gm-dashboard-pie-wrap">
                 <ResponsiveContainer width="100%" height="100%">
                   <PieChart>
+                    <defs>
+                      {PIE_COLORS.map((color, idx) => (
+                        <linearGradient key={idx} id={pieGradientId(idx)} x1="0" y1="0" x2="1" y2="1">
+                          <stop offset="0%" stopColor={color.light} />
+                          <stop offset="100%" stopColor={color.base} />
+                        </linearGradient>
+                      ))}
+                      <filter id="pieSliceGlow" x="-60%" y="-60%" width="220%" height="220%">
+                        <feDropShadow dx="0" dy="0" stdDeviation="5" floodOpacity="0.55" />
+                      </filter>
+                    </defs>
                     <Pie
                       data={spendingByCategory}
                       dataKey="amount"
@@ -162,7 +193,7 @@ export function DashboardCharts({ cashflowSeries, spendingByCategory }: Props) {
                       cy="50%"
                       outerRadius={86}
                       innerRadius={66}
-                      paddingAngle={2}
+                      paddingAngle={3}
                       isAnimationActive={false}
                     >
                       {spendingByCategory.map((entry, idx) => {
@@ -170,10 +201,11 @@ export function DashboardCharts({ cashflowSeries, spendingByCategory }: Props) {
                         return (
                           <Cell
                             key={entry.category}
-                            fill={PIE_COLORS[idx % PIE_COLORS.length]}
-                            stroke={active ? "#f4f8f3" : "transparent"}
+                            fill={`url(#${pieGradientId(idx)})`}
+                            stroke={active ? pieColor(idx) : "transparent"}
                             strokeWidth={active ? 3 : 1}
-                            opacity={active ? 1 : 0.4}
+                            opacity={active ? 1 : 0.42}
+                            filter={active ? "url(#pieSliceGlow)" : undefined}
                             style={{ transition: "opacity 150ms ease, stroke-width 150ms ease", cursor: "pointer" }}
                             onMouseEnter={() => setActiveSlice(idx)}
                           />
@@ -185,7 +217,7 @@ export function DashboardCharts({ cashflowSeries, spendingByCategory }: Props) {
                 <div className="gm-dashboard-pie-center">
                   <span>Total Spend</span>
                   <strong>{formatCompactMoney(totalSpend)}</strong>
-                  {focusedSlice && <em>{focusedSlice.category}</em>}
+                  {focusedSlice && <em style={{ color: pieColor(activeSlice), transition: "color 150ms ease" }}>{focusedSlice.category}</em>}
                 </div>
               </div>
               <ul className="gm-dashboard-pie-legend" aria-label="Expense category breakdown">
@@ -194,11 +226,15 @@ export function DashboardCharts({ cashflowSeries, spendingByCategory }: Props) {
                     <button
                       type="button"
                       className={idx === activeSlice ? "gm-dashboard-pie-legend__row--active" : undefined}
-                      style={idx === activeSlice ? { borderColor: PIE_COLORS[idx % PIE_COLORS.length] } : undefined}
+                      style={idx === activeSlice ? { borderColor: pieColor(idx) } : undefined}
                       onMouseEnter={() => setActiveSlice(idx)}
                       onFocus={() => setActiveSlice(idx)}
                     >
-                      <span className="gm-dashboard-pie-dot" style={{ background: PIE_COLORS[idx % PIE_COLORS.length] }} aria-hidden="true" />
+                      <span
+                        className="gm-dashboard-pie-dot"
+                        style={{ background: `linear-gradient(135deg, ${PIE_COLORS[idx % PIE_COLORS.length].light}, ${pieColor(idx)})` }}
+                        aria-hidden="true"
+                      />
                       <span className="gm-dashboard-pie-label">{entry.category}</span>
                       <span className="gm-dashboard-pie-value">{percentOfTotal(entry.amount)}</span>
                     </button>

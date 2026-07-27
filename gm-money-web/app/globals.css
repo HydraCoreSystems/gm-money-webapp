@@ -1290,11 +1290,21 @@ h3 {
   overflow: visible;
   border: 1px solid var(--line);
   background:
-    radial-gradient(120% 100% at 95% -10%, rgba(56, 124, 87, 0.15), transparent 48%),
-    radial-gradient(130% 100% at 0% 105%, rgba(185, 119, 37, 0.1), transparent 42%),
+    radial-gradient(120% 100% at 95% -10%, rgba(31, 157, 92, 0.16), transparent 48%),
+    radial-gradient(130% 100% at 0% 105%, rgba(214, 162, 51, 0.13), transparent 42%),
     var(--surface);
   box-shadow: var(--shadow-card);
-  animation: gm-card-rise 420ms ease-out both;
+  animation: gm-card-rise 480ms ease-out both;
+  transition: transform 220ms ease, box-shadow 220ms ease;
+}
+
+.gm-dashboard-chart-card:hover {
+  transform: translateY(-3px);
+  box-shadow: 0 18px 34px -18px rgba(20, 45, 33, 0.28), var(--shadow-card);
+}
+
+.gm-dashboard-charts .gm-dashboard-chart-card:nth-child(2) {
+  animation-delay: 90ms;
 }
 
 .gm-dashboard-chart-card::before {
@@ -1302,9 +1312,10 @@ h3 {
   position: absolute;
   inset: 0 auto auto 0;
   width: 100%;
-  height: 2px;
-  background: linear-gradient(90deg, rgba(63, 141, 96, 0.75), rgba(185, 119, 37, 0.78));
-  opacity: 0.7;
+  height: 3px;
+  background: linear-gradient(90deg, #1f9d5c, #d6a233 45%, #c1552f 75%, #5b4a9e);
+  opacity: 0.85;
+  border-radius: var(--radius-card) var(--radius-card) 0 0;
 }
 
 .gm-dashboard-chart-head {
@@ -1352,18 +1363,18 @@ h3 {
 }
 
 .gm-dashboard-cashflow-legend__dot--income {
-  background: #3f8d60;
+  background: #1f9d5c;
 }
 
 .gm-dashboard-cashflow-legend__dot--expense {
-  background: #c65e56;
+  background: #d8543f;
 }
 
 .gm-dashboard-cashflow-legend__dot--net {
   width: 12px;
   height: 3px;
   border-radius: 99px;
-  background: linear-gradient(90deg, #c38f41, #8d5d1d);
+  background: linear-gradient(90deg, #e8b23d, #b3691a);
 }
 
 .gm-dashboard-chart-frame--pie {
