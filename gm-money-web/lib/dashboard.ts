@@ -1,5 +1,6 @@
 import { getSupabaseServerClient, getBusinessId } from "./supabase";
 import { processDueScheduledTransactions } from "./scheduled";
+import { computeAdjustedAccountBalance } from "./register";
 
 // Per the owner's explicit instruction: nothing before this date should
 // be considered "current" activity. The 2+ years of pre-existing history
@@ -74,35 +75,28 @@ export async function getDashboardData(): Promise<DashboardData> {
   const supabase = getSupabaseServerClient();
   const businessId = await getBusinessId();
 
-  // Accounts + their real current balance. account_balance_snapshots is
-  // kept fresh by the Tiller sync (accounts.opening_balance is only the
-  // value as of the original migration, so prefer the latest snapshot and
-  // only fall back to opening_balance if a given account somehow has no
-  // snapshot rows yet).
-  const [{ data: accounts, error: accountsError }, { data: snapshots, error: snapshotsError }] = await Promise.all([
-    supabase.from("accounts").select("id, name, opening_balance").eq("business_id", businessId).eq("is_active", true),
-    supabase
-      .from("account_balance_snapshots")
-      .select("account_id, balance, balance_date")
-      .eq("business_id", businessId)
-      .order("balance_date", { ascending: false })
-      .limit(200),
-  ]);
+  // Accounts + their real CURRENT position -- not the raw bank-cleared
+  // snapshot. Per the owner's explicit, repeated direction, "Current
+  // Balance" must match how Microsoft Money actually worked: bank balance
+  // plus everything entered that hasn't cleared yet, the same adjusted
+  // figure the Register header shows (computeAdjustedAccountBalance is
+  // the exact same math getRegisterData uses for its currentBalance).
+  const { data: accounts, error: accountsError } = await supabase
+    .from("accounts")
+    .select("id, name, opening_balance")
+    .eq("business_id", businessId)
+    .eq("is_active", true);
   if (accountsError) throw new Error(accountsError.message);
-  if (snapshotsError) throw new Error(snapshotsError.message);
 
-  const latestBalanceByAccount = new Map<string, number>();
-  for (const snap of snapshots ?? []) {
-    if (!latestBalanceByAccount.has(snap.account_id)) {
-      latestBalanceByAccount.set(snap.account_id, Number(snap.balance));
-    }
+  // Sequential, not Promise.all -- the same concurrent-Supabase-query bug
+  // documented in lib/register.ts (silent empty/wrong results from
+  // parallel calls on one client instance) applies here too, and there
+  // are only ever a couple of accounts so the extra round trips are cheap.
+  const resolvedAccounts: { id: string; name: string; balance: number }[] = [];
+  for (const a of accounts ?? []) {
+    const balance = await computeAdjustedAccountBalance(a.id);
+    resolvedAccounts.push({ id: a.id, name: a.name, balance });
   }
-
-  const resolvedAccounts = (accounts ?? []).map((a) => ({
-    id: a.id,
-    name: a.name,
-    balance: latestBalanceByAccount.get(a.id) ?? Number(a.opening_balance),
-  }));
 
   // Income/expenses this month, driven by category type (never the raw
   // sign of the amount) -- the one rule this whole data model must never

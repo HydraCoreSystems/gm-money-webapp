@@ -160,7 +160,13 @@ export async function getRegisterData(accountId?: string): Promise<RegisterData>
     .eq("business_id", businessId);
   if (matchesError) throw new Error(matchesError.message);
 
-  const currentBalance = Number(snapshot?.balance ?? 0);
+  // This is what the BANK currently confirms -- it does not yet reflect
+  // anything you've entered that hasn't cleared. It's an anchor for the
+  // per-row walk below, not what gets shown as "Current Balance" (see
+  // adjustedBalance at the end of this function -- the owner was
+  // explicit that a real Money-style register shows your true current
+  // position, not just whatever the bank has gotten around to clearing).
+  const rawBankBalance = Number(snapshot?.balance ?? 0);
   const explicitBankIdsToHide = new Set((matches ?? []).map((m) => m.bank_transaction_id as string));
   const explicitlyMatchedManualIds = new Set((matches ?? []).map((m) => m.manual_transaction_id as string));
 
@@ -187,7 +193,7 @@ export async function getRegisterData(accountId?: string): Promise<RegisterData>
 
   const { visible, candidateByManualId } = dedupe(rawRows, explicitBankIdsToHide, explicitlyMatchedManualIds);
 
-  // Anchor: the current balance already reflects every cleared entry, so
+  // Anchor: the bank balance already reflects every cleared entry, so
   // walk backward first to find the balance *before* them, then forward
   // chronologically through everything (cleared and uncleared) so every
   // row gets a mathematically consistent running balance -- same
@@ -195,7 +201,7 @@ export async function getRegisterData(accountId?: string): Promise<RegisterData>
   const clearedSum = visible
     .filter((r) => effectiveStatus(r, explicitlyMatchedManualIds) === "cleared")
     .reduce((sum, r) => sum + Number(r.amount), 0);
-  let runningBalance = currentBalance - clearedSum;
+  let runningBalance = rawBankBalance - clearedSum;
 
   const entries: RegisterEntry[] = visible.map((r) => {
     runningBalance += Number(r.amount);
@@ -220,14 +226,70 @@ export async function getRegisterData(accountId?: string): Promise<RegisterData>
     };
   });
 
+  // After walking every entry, runningBalance = rawBankBalance - clearedSum
+  // + sum(all entries) = rawBankBalance + unclearedSum -- your real
+  // current position accounting for everything entered, cleared or not.
+  // This, not the raw bank figure, is what "Current Balance" means here.
+  const adjustedBalance = runningBalance;
+
   entries.reverse(); // most recent first, matching the old app's Register display order
 
   return {
     accountId: account.id,
     accountName: account.name,
-    currentBalance,
+    currentBalance: adjustedBalance,
     entries,
   };
+}
+
+// Same adjusted-balance concept as getRegisterData's currentBalance, but
+// without doing the full heuristic dedupe walk -- the Dashboard just
+// needs the number for each account, not per-row match candidates.
+// Mathematically exact, not an approximation: a manual entry is
+// "uncleared" here under the identical rule getRegisterData's
+// effectiveStatus() uses (explicitly matched, or already stored as
+// cleared, counts as cleared; everything else counts as pending) --
+// bank-fed rows are always cleared by definition so they never need to
+// be summed in here at all.
+export async function computeAdjustedAccountBalance(accountId: string): Promise<number> {
+  const supabase = getSupabaseServerClient();
+  const businessId = await getBusinessId();
+
+  const { data: snapshot, error: snapshotError } = await supabase
+    .from("account_balance_snapshots")
+    .select("balance")
+    .eq("account_id", accountId)
+    .order("balance_date", { ascending: false })
+    .limit(1)
+    .maybeSingle();
+  if (snapshotError) throw new Error(snapshotError.message);
+  const rawBankBalance = Number(snapshot?.balance ?? 0);
+
+  const { data: matches, error: matchesError } = await supabase
+    .from("transaction_matches")
+    .select("manual_transaction_id")
+    .eq("business_id", businessId);
+  if (matchesError) throw new Error(matchesError.message);
+  const matchedIds = new Set((matches ?? []).map((m) => m.manual_transaction_id as string));
+
+  const PAGE_SIZE = 1000;
+  let unclearedSum = 0;
+  for (let page = 0; ; page++) {
+    const { data: batch, error } = await supabase
+      .from("transactions")
+      .select("id, amount, status")
+      .eq("account_id", accountId)
+      .eq("source", "sheet_manual")
+      .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
+    if (error) throw new Error(error.message);
+    for (const row of batch ?? []) {
+      const isCleared = matchedIds.has(row.id) || row.status === "cleared";
+      if (!isCleared) unclearedSum += Number(row.amount);
+    }
+    if (!batch || batch.length < PAGE_SIZE) break;
+  }
+
+  return rawBankBalance + unclearedSum;
 }
 
 export async function getActiveAccounts(): Promise<{ id: string; name: string }[]> {
