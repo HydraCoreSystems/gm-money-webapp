@@ -223,6 +223,12 @@ export async function processDueScheduledTransactions(todayDate = toDateKey(new 
           currency: "USD",
           status: "uncleared",
           source: "schedule_auto",
+          // Same pre-existing NULLS NOT DISTINCT constraint that broke
+          // manual Entry inserts (see app/entry/actions.ts) applies here
+          // too, scoped to source='schedule_auto' -- without this, only
+          // the first auto-posted recurring transaction would ever
+          // succeed; every one after it would silently fail the cron.
+          source_record_id: crypto.randomUUID(),
           payment_method: row.payment_method,
           notes: row.notes,
           review_status: "approved",

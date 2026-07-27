@@ -185,6 +185,14 @@ export async function createTransaction(formData: FormData): Promise<CreateTrans
       currency: "USD",
       status: "uncleared",
       source: "sheet_manual",
+      // This table has a pre-existing unique constraint on
+      // (business_id, source, source_record_id) with NULLS NOT DISTINCT
+      // -- leaving this null meant only ONE manual entry could EVER exist
+      // at a time (every entry after the first collided with it, a real
+      // bug that silently blocked all manual entry). A random UUID is
+      // all that's needed here -- manual entries aren't deduplicated
+      // against each other the way a recurring external sync is.
+      source_record_id: crypto.randomUUID(),
       payment_method: paymentMethod,
       notes,
       review_status: "approved", // manual entries are categorized at entry time, unlike bank-fed rows awaiting Review

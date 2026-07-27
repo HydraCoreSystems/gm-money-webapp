@@ -22,6 +22,7 @@ export function EntryForm({
   categoryGroups: CategoryGroupOption[];
 }) {
   const [selection, setSelection] = useState<Selection | null>(null);
+  const [amount, setAmount] = useState("");
   const [status, setStatus] = useState<"idle" | "success">("idle");
   const [error, setError] = useState("");
   const [notice, setNotice] = useState("");
@@ -31,6 +32,30 @@ export function EntryForm({
   const [recurringLimit, setRecurringLimit] = useState("");
   const [recurringAutoCreate, setRecurringAutoCreate] = useState(true);
   const [isPending, startTransition] = useTransition();
+
+  // The server already rejects a sign/category mismatch outright (see
+  // createTransaction's validation) -- this just does that correction
+  // proactively so the user never has to notice and manually flip a
+  // sign themselves. Applied at two discrete moments (category change,
+  // amount blur) rather than on every keystroke, so it can't fight an
+  // in-progress amount while someone's still typing it.
+  function signCorrected(raw: string, type: "income" | "expense" | undefined | null): string {
+    const trimmed = raw.trim();
+    if (!trimmed || !type) return raw;
+    const num = Number(trimmed);
+    if (!Number.isFinite(num) || num === 0) return raw;
+    const corrected = type === "income" ? Math.abs(num) : -Math.abs(num);
+    return corrected === num ? raw : String(corrected);
+  }
+
+  function handleSelectionChange(sel: Selection | null) {
+    setSelection(sel);
+    setAmount((prev) => signCorrected(prev, sel?.type));
+  }
+
+  function handleAmountBlur() {
+    setAmount((prev) => signCorrected(prev, selection?.type));
+  }
 
   async function handleSubmit(formData: FormData) {
     setError("");
@@ -48,6 +73,7 @@ export function EntryForm({
     }
     setStatus("success");
     setSelection(null);
+    setAmount("");
     if (createRecurring) {
       if (result.recurringCreated) {
         setNotice("Recurring schedule was also created.");
@@ -103,20 +129,30 @@ export function EntryForm({
           </div>
           <div className="gm-field">
             <label htmlFor="amount">Amount</label>
-            <input id="amount" type="number" name="amount" step="0.01" placeholder="-42.50 or 100.00" required />
+            <input
+              id="amount"
+              type="number"
+              name="amount"
+              step="0.01"
+              placeholder="42.50"
+              value={amount}
+              onChange={(e) => setAmount(e.target.value)}
+              onBlur={handleAmountBlur}
+              required
+            />
           </div>
         </div>
 
         <CategoryPicker
           groups={categoryGroups}
           value={selection}
-          onChange={setSelection}
+          onChange={handleSelectionChange}
           categoryFieldName="categoryId"
           subcategoryFieldName="subcategoryId"
           allowCreate
         />
         <p className="gm-category-picker__hint" style={{ marginTop: -12, marginBottom: 16 }}>
-          Amount's sign must match the category (negative for Expense, positive for Income).
+          Expense amounts are entered as negative, Income as positive -- picking a category sets this automatically.
         </p>
 
         <div className="gm-form-grid gm-form-grid--two">
