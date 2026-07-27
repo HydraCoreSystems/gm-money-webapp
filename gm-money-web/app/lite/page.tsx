@@ -24,7 +24,7 @@ export default async function LitePage() {
   try {
     [balances, accounts, categoryGroups] = await Promise.all([getLiteBalances(), getActiveAccounts(), getCategoryGroups()]);
   } catch (err) {
-    loadError = err instanceof Error ? err.message : "Could not load GM Money.";
+    loadError = err instanceof Error ? err.message : "Could not load GM Money 2026.";
   }
 
   return (
@@ -33,7 +33,7 @@ export default async function LitePage() {
         <div className="gm-brand-lockup" style={{ padding: 0 }}>
           <div className="gm-brand-mark">GM</div>
           <div>
-            <strong style={{ color: "var(--ink)" }}>Gathering Moss</strong>
+            <strong style={{ color: "var(--ink)" }}>GM Money 2026</strong>
             <span style={{ color: "var(--muted)" }}>Financial Center</span>
           </div>
         </div>

@@ -12,7 +12,7 @@ export default async function LoginPage({ searchParams }: { searchParams: { erro
         <div className="gm-brand-lockup" style={{ padding: "0 0 24px" }}>
           <div className="gm-brand-mark">GM</div>
           <div>
-            <strong style={{ color: "var(--ink)" }}>Gathering Moss</strong>
+            <strong style={{ color: "var(--ink)" }}>GM Money 2026</strong>
             <span style={{ color: "var(--muted)" }}>Financial Center</span>
           </div>
         </div>

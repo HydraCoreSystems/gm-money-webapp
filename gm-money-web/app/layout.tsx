@@ -39,7 +39,7 @@ const THEME_BOOTSTRAP_SCRIPT = `
 const inter = Inter({ subsets: ["latin"], weight: ["400", "500", "600"] });
 
 export const metadata: Metadata = {
-  title: "GM Money",
+  title: "GM Money 2026",
   manifest: "/manifest.webmanifest",
   // iOS Safari's "Add to Home Screen" reads these meta tags (generated
   // automatically from this config), not manifest.json, to decide
@@ -48,7 +48,7 @@ export const metadata: Metadata = {
   appleWebApp: {
     capable: true,
     statusBarStyle: "black-translucent",
-    title: "GM Money",
+    title: "GM Money 2026",
   },
 };
 

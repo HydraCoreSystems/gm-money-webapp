@@ -20,14 +20,14 @@ export default async function SetupPage({
         <div className="gm-brand-lockup" style={{ padding: "0 0 24px" }}>
           <div className="gm-brand-mark">GM</div>
           <div>
-            <strong style={{ color: "var(--ink)" }}>Gathering Moss</strong>
+            <strong style={{ color: "var(--ink)" }}>GM Money 2026</strong>
             <span style={{ color: "var(--muted)" }}>First-time setup</span>
           </div>
         </div>
 
         <h2 style={{ marginTop: 0 }}>Create owner account</h2>
         <p className="gm-register-note" style={{ marginTop: 0 }}>
-          This account will manage users and settings for GM Money.
+          This account will manage users and settings for GM Money 2026.
         </p>
 
         {searchParams.error && <p className="gm-error">{searchParams.error}</p>}

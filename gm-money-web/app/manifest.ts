@@ -8,7 +8,10 @@ import type { MetadataRoute } from "next";
 // both are wired up.
 export default function manifest(): MetadataRoute.Manifest {
   return {
-    name: "GM Money",
+    name: "GM Money 2026",
+    // Kept short (not "GM Money 2026") -- this is what shows under the
+    // home-screen icon on a phone, where the full name would truncate
+    // awkwardly.
     short_name: "GM Money",
     description: "Gathering Moss Financial Center",
     start_url: "/lite",

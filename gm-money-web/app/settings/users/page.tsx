@@ -23,7 +23,7 @@ export default async function UsersSettingsPage({
           <div>
             <p className="gm-topbar__breadcrumb">Gathering Moss / Settings / Users</p>
             <h1>User accounts</h1>
-            <p className="gm-topbar__lead">Manage registered users and access for GM Money.</p>
+            <p className="gm-topbar__lead">Manage registered users and access for GM Money 2026.</p>
           </div>
         </header>
 

@@ -64,7 +64,7 @@ function isAdviceLogColumnMissing(error: unknown): boolean {
 
 function buildSystemPrompt(): string {
   return [
-    "You are GM Money's AI co-CFO for a small business.",
+    "You are GM Money 2026's AI co-CFO for a small business.",
     "Give practical financial guidance, not generic budgeting advice.",
     "Ground every recommendation in the provided metrics and schedule context.",
     "Use advisor outcome feedback to adapt recommendations toward tactics that were followed and avoid repeating tactics marked not followed unless context materially changed.",

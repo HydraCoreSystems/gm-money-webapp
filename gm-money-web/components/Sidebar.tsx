@@ -22,7 +22,7 @@ export function Sidebar({ active }: { active: string }) {
       <div className="gm-brand-lockup">
         <div className="gm-brand-mark">GM</div>
         <div>
-          <strong>Gathering Moss</strong>
+          <strong>GM Money 2026</strong>
           <span>Financial Center</span>
         </div>
       </div>
