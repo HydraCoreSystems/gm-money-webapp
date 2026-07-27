@@ -163,8 +163,7 @@ export function DashboardCharts({ cashflowSeries, spendingByCategory }: Props) {
                       outerRadius={86}
                       innerRadius={66}
                       paddingAngle={2}
-                      isAnimationActive
-                      animationDuration={1100}
+                      isAnimationActive={false}
                     >
                       {spendingByCategory.map((entry, idx) => {
                         const active = idx === activeSlice;
