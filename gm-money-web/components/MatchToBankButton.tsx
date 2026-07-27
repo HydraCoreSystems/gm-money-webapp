@@ -57,7 +57,7 @@ export function MatchToBankButton({ manualId, accountId, candidate }: Props) {
       </div>
       <div className="gm-register-row__match-actions">
         <button type="button" className="gm-button gm-button--secondary" disabled={isPending} onClick={handleClick}>
-          {isPending ? "Confirming..." : "Yes, same purchase -- confirm & clear"}
+          {isPending ? "Confirming..." : `Yes, same ${candidate.amount < 0 ? "purchase" : "deposit"} -- confirm & clear`}
         </button>
         {error && <span className="gm-error gm-error--inline">{error}</span>}
       </div>
