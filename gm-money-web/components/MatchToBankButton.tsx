@@ -10,22 +10,21 @@ type Props = {
   candidate: MatchCandidate;
 };
 
-function formatMoney(amount: number): string {
-  const sign = amount < 0 ? "-" : "";
+function formatMoneySigned(amount: number): string {
+  const sign = amount < 0 ? "-" : "+";
   return `${sign}$${Math.abs(amount).toFixed(2)}`;
 }
 
+// Renders the actual suspected-duplicate bank row -- not just a sentence
+// describing it -- so confirming a match means comparing two real rows,
+// not trusting a text description of one you can't see. The amount here
+// is never added to the running balance above; it's a read-only preview
+// of the bank row still hidden from the real ledger until confirmed.
 export function MatchToBankButton({ manualId, accountId, candidate }: Props) {
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
 
   function handleClick() {
-    const confirmed = window.confirm(
-      `Match this to the bank transaction "${candidate.description}" (${formatMoney(candidate.amount)}, ${candidate.date})? ` +
-        "This entry will be marked Cleared and the bank row will stay hidden as its duplicate.",
-    );
-    if (!confirmed) return;
-
     setError("");
     const formData = new FormData();
     formData.set("manualId", manualId);
@@ -42,10 +41,26 @@ export function MatchToBankButton({ manualId, accountId, candidate }: Props) {
 
   return (
     <div className="gm-register-row__match">
-      <button type="button" className="gm-link-button" disabled={isPending} onClick={handleClick}>
-        {isPending ? "Matching..." : `Looks like "${candidate.description}" (${formatMoney(candidate.amount)}) — confirm & clear`}
-      </button>
-      {error && <span className="gm-error gm-error--inline">{error}</span>}
+      <div className="gm-register-row__match-label">Possible match for the entry above -- not yet counted in your balance</div>
+      <div className="gm-register-row__match-preview">
+        <div className="gm-register-row__match-main">
+          <div className="gm-register-row__payee">{candidate.description}</div>
+          <div className="gm-register-row__meta">{candidate.date} · from your bank feed</div>
+        </div>
+        <div
+          className={
+            candidate.amount < 0 ? "gm-register-row__amount--negative" : "gm-register-row__amount--positive"
+          }
+        >
+          {formatMoneySigned(candidate.amount)}
+        </div>
+      </div>
+      <div className="gm-register-row__match-actions">
+        <button type="button" className="gm-button gm-button--secondary" disabled={isPending} onClick={handleClick}>
+          {isPending ? "Confirming..." : "Yes, same purchase -- confirm & clear"}
+        </button>
+        {error && <span className="gm-error gm-error--inline">{error}</span>}
+      </div>
     </div>
   );
 }

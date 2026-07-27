@@ -1003,15 +1003,47 @@ h3 {
 }
 
 .gm-register-row__match {
-  padding-top: 0.35rem;
-  border-top: 1px dashed var(--line);
+  margin-top: 0.35rem;
+  padding: 0.6rem 0.7rem;
+  border: 1px dashed var(--line-strong);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--surface) 60%, transparent);
 }
 
-.gm-register-row__match .gm-link-button {
-  color: var(--forest);
-  font-weight: 500;
-  white-space: normal;
-  text-align: left;
+.gm-register-row__match-label {
+  font-size: 0.72rem;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.03em;
+  color: var(--muted);
+  margin-bottom: 0.4rem;
+}
+
+.gm-register-row__match-preview {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.75rem;
+  font-style: italic;
+  opacity: 0.85;
+}
+
+.gm-register-row__match-main {
+  flex: 1;
+  min-width: 0;
+}
+
+.gm-register-row__match-actions {
+  display: flex;
+  align-items: center;
+  gap: 0.6rem;
+  margin-top: 0.6rem;
+}
+
+.gm-register-row__match-actions .gm-button {
+  width: auto;
+  padding: 0.4rem 0.85rem;
+  font-size: 0.85rem;
 }
 
 .gm-register-row__actions {
