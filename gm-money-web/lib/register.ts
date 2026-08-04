@@ -8,6 +8,9 @@ type RawTransaction = {
   amount: number;
   status: string;
   source: string;
+  category_id: string | null;
+  payment_method: string | null;
+  notes: string | null;
   categories: { name: string } | null;
 };
 
@@ -26,6 +29,13 @@ export type RegisterEntry = {
   status: string;
   source: string;
   category: string | null;
+  // Leaf category id (a subcategory row if one is set, otherwise the
+  // top-level category row) plus payment method/notes -- not needed for
+  // the read-only display, only carried through so an edit form can be
+  // pre-filled with the entry's real current values.
+  categoryId: string | null;
+  paymentMethod: string | null;
+  notes: string | null;
   runningBalance: number;
   // Set only for an unmatched manual entry the heuristic below thinks
   // corresponds to a specific visible-elsewhere-hidden bank row -- lets
@@ -182,7 +192,7 @@ export async function getRegisterData(accountId?: string): Promise<RegisterData>
   for (let page = 0; ; page++) {
     const { data: batch, error: txError } = await supabase
       .from("transactions")
-      .select("id, transaction_date, description, amount, status, source, categories(name)")
+      .select("id, transaction_date, description, amount, status, source, category_id, payment_method, notes, categories(name)")
       .eq("account_id", account.id)
       .order("transaction_date", { ascending: true })
       .range(page * PAGE_SIZE, page * PAGE_SIZE + PAGE_SIZE - 1);
@@ -214,6 +224,9 @@ export async function getRegisterData(accountId?: string): Promise<RegisterData>
       status: effectiveStatus(r, explicitlyMatchedManualIds),
       source: r.source,
       category: r.categories?.name ?? null,
+      categoryId: r.category_id,
+      paymentMethod: r.payment_method,
+      notes: r.notes,
       runningBalance,
       matchCandidate: candidate
         ? {

@@ -1047,6 +1047,18 @@ h3 {
   margin: 0;
 }
 
+.gm-register-row__edit {
+  padding-top: 0.4rem;
+}
+
+.gm-register-row__edit .gm-field {
+  margin-bottom: 0;
+}
+
+.gm-register-row__edit .gm-category-picker {
+  margin: 0.85rem 0;
+}
+
 .gm-register-row__match {
   margin-top: 0.35rem;
   padding: 0.6rem 0.7rem;

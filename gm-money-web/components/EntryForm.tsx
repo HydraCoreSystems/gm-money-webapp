@@ -4,10 +4,9 @@ import { useState, useTransition } from "react";
 import { CategoryPicker } from "./CategoryPicker";
 import { createTransaction } from "@/app/entry/actions";
 import type { CategoryGroupOption } from "@/lib/categories";
+import { PAYMENT_METHODS } from "@/lib/paymentMethods";
 
 type Selection = { categoryId: string; subcategoryId: string | null; type: "income" | "expense" };
-
-const PAYMENT_METHODS = ["Debit Card", "Credit Card", "Cash", "Check", "ACH", "Wire", "PayPal", "Venmo", "Shopify Payout", "Square", "Other"];
 
 function todayLocalDate(): string {
   const now = new Date();

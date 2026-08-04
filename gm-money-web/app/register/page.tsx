@@ -1,33 +1,26 @@
 import { getRegisterData, getActiveAccounts, type RegisterData } from "@/lib/register";
+import { getCategoryGroups, type CategoryGroupOption } from "@/lib/categories";
 import { Sidebar } from "@/components/Sidebar";
-import { DeleteRegisterEntryButton } from "@/components/DeleteRegisterEntryButton";
-import { MatchToBankButton } from "@/components/MatchToBankButton";
+import { RegisterEntryRow } from "@/components/RegisterEntryRow";
 
 export const dynamic = "force-dynamic";
-
-function formatMoneySigned(amount: number): string {
-  const sign = amount < 0 ? "-" : "+";
-  return `${sign}$${Math.abs(amount).toFixed(2)}`;
-}
 
 function formatMoney(amount: number): string {
   const sign = amount < 0 ? "-" : "";
   return `${sign}$${Math.abs(amount).toFixed(2)}`;
 }
 
-function statusBadgeClass(status: string): string {
-  if (status === "cleared") return "gm-status-badge gm-status-badge--cleared";
-  if (status === "uncleared") return "gm-status-badge gm-status-badge--uncleared";
-  return "gm-status-badge gm-status-badge--reconciled";
-}
-
 export default async function RegisterPage({ searchParams }: { searchParams: { account?: string } }) {
   let accounts: { id: string; name: string }[] = [];
   let data: RegisterData | undefined;
+  let categoryGroups: CategoryGroupOption[] = [];
   let loadError: string | null = null;
   try {
+    // Sequential, not Promise.all -- see lib/register.ts's own note on the
+    // concurrent-Supabase-query bug this codebase has already hit once.
     accounts = await getActiveAccounts();
     data = await getRegisterData(searchParams.account);
+    categoryGroups = await getCategoryGroups();
   } catch (err) {
     loadError = err instanceof Error ? err.message : "Could not load the register.";
   }
@@ -85,32 +78,7 @@ export default async function RegisterPage({ searchParams }: { searchParams: { a
 
             <div className="gm-register-list" style={{ padding: "0 22px 22px" }}>
               {data.entries.map((e) => (
-                <div key={e.id} className="gm-register-row">
-                  <div className="gm-register-row__top">
-                    <div className="gm-register-row__main">
-                      <div className="gm-register-row__payee">{e.description}</div>
-                      <div className="gm-register-row__meta">
-                        {e.date}
-                        {e.category ? ` · ${e.category}` : " · Uncategorized"}
-                      </div>
-                    </div>
-                    <div className="gm-register-row__amounts">
-                      <div className={e.amount < 0 ? "gm-register-row__amount--negative" : "gm-register-row__amount--positive"}>
-                        {formatMoneySigned(e.amount)}
-                      </div>
-                      <div className="gm-register-row__balance">{formatMoney(e.runningBalance)}</div>
-                    </div>
-                  </div>
-                  <div className="gm-register-row__actions">
-                    <span className={statusBadgeClass(e.status)}>{e.status}</span>
-                    {e.source === "sheet_manual" && data && (
-                      <DeleteRegisterEntryButton id={e.id} accountId={data.accountId} description={e.description} />
-                    )}
-                  </div>
-                  {e.matchCandidate && data && (
-                    <MatchToBankButton manualId={e.id} accountId={data.accountId} candidate={e.matchCandidate} />
-                  )}
-                </div>
+                <RegisterEntryRow key={e.id} entry={e} accountId={data!.accountId} categoryGroups={categoryGroups} />
               ))}
             </div>
           </div>

@@ -56,6 +56,93 @@ export async function deleteManualTransaction(formData: FormData): Promise<Delet
   return { ok: true };
 }
 
+export type UpdateTransactionResult = { ok: true } | { ok: false; error: string };
+
+// Lets a manual entry be corrected in place -- e.g. a mistyped dollar
+// amount -- instead of the only prior option (delete the wrong entry,
+// re-enter it from scratch). Same category/sign invariant as
+// createTransaction (app/entry/actions.ts): the category alone determines
+// Income/Expense, never a client-supplied flag, and the two must always
+// agree. Bank-fed and schedule-generated rows aren't editable here for the
+// same reasons they aren't deletable here (see deleteManualTransaction).
+export async function updateManualTransaction(formData: FormData): Promise<UpdateTransactionResult> {
+  await requireAuthenticatedUser();
+
+  const id = String(formData.get("id") || "").trim();
+  const accountId = String(formData.get("accountId") || "").trim();
+  const date = String(formData.get("date") || "");
+  const payee = String(formData.get("payee") || "").trim();
+  const amountText = String(formData.get("amount") || "");
+  const categoryId = String(formData.get("categoryId") || "");
+  const subcategoryId = String(formData.get("subcategoryId") || "") || null;
+  const leafCategoryId = subcategoryId || categoryId;
+  const paymentMethod = String(formData.get("paymentMethod") || "").trim() || null;
+  const notes = String(formData.get("notes") || "").trim() || null;
+
+  if (!id || !date || !payee || !amountText || !categoryId) {
+    return { ok: false, error: "Date, payee, amount, and category are all required." };
+  }
+
+  const supabase = getSupabaseServerClient();
+  const businessId = await getBusinessId();
+
+  const { data: existing, error: lookupError } = await supabase
+    .from("transactions")
+    .select("id, source")
+    .eq("business_id", businessId)
+    .eq("id", id)
+    .maybeSingle();
+  if (lookupError) return { ok: false, error: lookupError.message };
+  if (!existing) return { ok: false, error: "Transaction not found." };
+  if (existing.source !== "sheet_manual") {
+    return { ok: false, error: "Only manually-entered transactions can be edited here." };
+  }
+
+  const { data: category, error: categoryError } = await supabase
+    .from("categories")
+    .select("category_type")
+    .eq("id", leafCategoryId)
+    .single();
+  if (categoryError || !category) {
+    return { ok: false, error: "Could not look up that category's type." };
+  }
+
+  const amount = Number(amountText);
+  if (!isFinite(amount) || amount === 0) {
+    return { ok: false, error: "Amount must be a non-zero number." };
+  }
+  const expectedSign = category.category_type === "income" ? 1 : -1;
+  if (Math.sign(amount) !== expectedSign) {
+    return {
+      ok: false,
+      error: `That category is ${category.category_type}, so the amount should be ${expectedSign > 0 ? "positive" : "negative"}.`,
+    };
+  }
+
+  const { error: updateError } = await supabase
+    .from("transactions")
+    .update({
+      transaction_date: date,
+      description: payee,
+      amount,
+      category_id: leafCategoryId,
+      payment_method: paymentMethod,
+      notes,
+    })
+    .eq("business_id", businessId)
+    .eq("id", id)
+    .eq("source", "sheet_manual");
+  if (updateError) return { ok: false, error: updateError.message };
+
+  revalidatePath("/");
+  revalidatePath("/register");
+  if (accountId) {
+    revalidatePath(`/register?account=${accountId}`);
+  }
+
+  return { ok: true };
+}
+
 export type MatchTransactionResult = { ok: true } | { ok: false; error: string };
 
 // Reconciliation: confirms that a manual entry and a bank-fed transaction
