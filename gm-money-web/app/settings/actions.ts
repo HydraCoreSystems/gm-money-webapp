@@ -3,52 +3,6 @@
 import { revalidatePath } from "next/cache";
 import { getSupabaseServerClient, getBusinessId } from "@/lib/supabase";
 
-export async function createCategory(formData: FormData) {
-  const name = String(formData.get("name") || "").trim();
-  const type = String(formData.get("type") || "expense");
-  if (!name) return { ok: false, error: "Category name is required." };
-
-  const supabase = getSupabaseServerClient();
-  const businessId = await getBusinessId();
-
-  const { error } = await supabase.from("categories").insert({
-    business_id: businessId,
-    name,
-    category_type: type,
-    is_active: true,
-    sort_order: 1000,
-  });
-
-  if (error) return { ok: false, error: error.message };
-
-  revalidatePath("/settings");
-  revalidatePath("/");
-  return { ok: true };
-}
-
-export async function createSubcategory(formData: FormData) {
-  const parentId = String(formData.get("parentId") || "").trim();
-  const name = String(formData.get("name") || "").trim();
-  if (!parentId || !name) return { ok: false, error: "Parent category and subcategory name are required." };
-
-  const supabase = getSupabaseServerClient();
-  const businessId = await getBusinessId();
-
-  const { error } = await supabase.from("categories").insert({
-    business_id: businessId,
-    parent_id: parentId,
-    name,
-    category_type: "expense",
-    is_active: true,
-    sort_order: 1000,
-  });
-
-  if (error) return { ok: false, error: error.message };
-
-  revalidatePath("/settings");
-  return { ok: true };
-}
-
 export async function setBudget(formData: FormData) {
   const categoryId = String(formData.get("categoryId") || "").trim();
   const amountText = String(formData.get("amount") || "").trim();
