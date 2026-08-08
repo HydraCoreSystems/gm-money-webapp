@@ -1,16 +1,14 @@
 import { getSupabaseServerClient, getBusinessId } from "./supabase";
 import { processDueScheduledTransactions } from "./scheduled";
 import { computeAdjustedAccountBalance } from "./register";
+import { CUTOFF_DATE } from "./constants";
 
-// Per the owner's explicit instruction: nothing before this date should
-// be considered "current" activity. Originally 2026-07-19; moved forward
-// to 2026-08-01 on 2026-08-08 for a second clean slate after a Tiller
-// sync bug (date-drift duplicate transactions) muddied the history in
-// between. This does NOT affect account balances (those are real
-// point-in-time snapshots, unaffected by which transactions we choose to
-// display) -- confirmed no uncleared transactions exist before this date,
-// so nothing pending is being hidden either.
-export const CUTOFF_DATE = "2026-08-01";
+// Re-exported for backward compatibility with existing imports
+// (e.g. app/page.tsx imports CUTOFF_DATE from "@/lib/dashboard"). The
+// canonical definition lives in lib/constants.ts -- see its comment for
+// the full rationale.
+export { CUTOFF_DATE };
+
 const CHART_DAY_WINDOW = 30;
 
 // Floored at CUTOFF_DATE, same pattern as chartWindowStart() below --

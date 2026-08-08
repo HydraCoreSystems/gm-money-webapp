@@ -1,16 +1,15 @@
 import { getSupabaseServerClient, getBusinessId } from "./supabase";
 import { processDueScheduledTransactions } from "./scheduled";
+import { CUTOFF_DATE } from "./constants";
 
-// Kept in sync with lib/dashboard.ts / lib/review.ts / the tiller-sync
-// route's CUTOFF_DATE -- see lib/dashboard.ts's comment for the full
-// rationale. Applied here only to the final displayed entries list, NOT
-// to the underlying query or the running-balance walk below: those still
-// need the complete history to anchor correctly off the real bank
-// balance. Slicing the query itself would also silently drop the bank
-// side of any manual/bank match pair that straddles the cutoff (a real
-// entry hidden with no visible counterpart) -- filtering only the final
-// list sidesteps that entirely.
-const CUTOFF_DATE = "2026-08-01";
+// Applied only to the final displayed entries list, NOT to the underlying
+// query or the running-balance walk below: those still need the complete
+// history to anchor correctly off the real bank balance. Slicing the query
+// itself would also silently drop the bank side of any manual/bank match
+// pair that straddles the cutoff (a real entry hidden with no visible
+// counterpart) -- filtering only the final list sidesteps that entirely.
+// CUTOFF_DATE itself lives in lib/constants.ts (single source of truth,
+// also used by the Dashboard, Review, and the Tiller-sync route).
 
 type RawTransaction = {
   id: string;

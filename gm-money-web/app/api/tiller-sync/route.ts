@@ -1,17 +1,18 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseServerClient, getBusinessId } from "@/lib/supabase";
+import { CUTOFF_DATE } from "@/lib/constants";
 
 const SHARED_SECRET = process.env.TILLER_SYNC_SECRET;
 
-// Kept in sync with lib/dashboard.ts / lib/review.ts's CUTOFF_DATE. This
-// has to be enforced HERE, not just relied on via the Apps Script sender's
-// lookback window -- the recurring 15-minute sync re-sends its whole
-// window every run, so anything the sender includes for a date before
-// this would otherwise silently repopulate the history that was
+// CUTOFF_DATE comes from lib/constants.ts (single source of truth, shared
+// with the Dashboard/Register/Review), NOT a locally redeclared literal.
+// It has to be enforced HERE, not just relied on via the Apps Script
+// sender's lookback window -- the recurring 15-minute sync re-sends its
+// whole window every run, so anything the sender includes for a date
+// before this would otherwise silently repopulate the history that was
 // deliberately purged for a clean slate (exactly what happened once
 // already: a 60-day sender window quietly brought back 166 pre-cutoff
 // rows within a couple of sync cycles).
-const CUTOFF_DATE = "2026-08-01";
 
 type IncomingPayload = {
   accountName?: string;
