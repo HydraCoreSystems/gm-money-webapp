@@ -21,10 +21,14 @@ behavior; **[agent]** = reported by a deep-read reviewer agent and spot-checked
 but not independently exercised. Live read-only DB checks were run against the
 production `gm_money` schema to test whether each risk has actually manifested.
 
-**Caveat about the old system:** per `HANDOFF.md` §9, whether Crystal/Phil
-still use the Sheets UI + old API in parallel is an unresolved question.
-Several of the worst findings below only bite if **that** system is still being
-written to; they are grouped in §2 and each notes its dependency.
+**Old-system status (confirmed by owner, 2026-08-08):** the old
+`app-script-backend` system is used **only** for ingesting Tiller bank data
+(`TillerSync.gs` runs on a schedule); **no human interaction** with the Sheets
+UI, old frontend, Entry/Register/Review flows, or the old API dashboard.
+Consequently the old-system findings below (A1–A3, A10–A18) are **no longer
+applicable** to real usage — they are recorded for completeness and would only
+matter if the legacy human UI were ever revived. The remaining actionable set
+is the `gm-money-web` list (A5–A9, A19, A20).
 
 ---
 
@@ -32,30 +36,32 @@ written to; they are grouped in §2 and each notes its dependency.
 
 | #  | Sev | System              | One-line |
 |----|-----|---------------------|----------|
-| A1 | High | app-script-backend   | Sheet-UI entry writes Subcategory into a legacy "Business Area" column — subcategory silently lost (needs old system in use) |
-| A2 | High | app-script-backend   | Deterministic bank-key collisions hide/never-categorize a second identical transaction (needs old system in use) |
-| A3 | High | gm-money-frontend    | Settings edits never refresh the frozen FormOptions used by every other screen — stale/wrong category lists |
-| A4 | Med  | gm-money-frontend    | Shared password in sessionStorage, sent in cleartext per call |
+| A1 | N/A* | app-script-backend   | Sheet-UI entry writes Subcategory into a legacy "Business Area" column (no human UI use) |
+| A2 | N/A* | app-script-backend   | Deterministic bank-key collisions hide one of two identical rows (no human UI use) |
+| A3 | N/A* | gm-money-frontend    | Frozen FormOptions → stale category lists (no human UI use) |
+| A4 | N/A* | gm-money-frontend    | Shared password in sessionStorage, sent cleartext per call (no human UI use) |
 | A5 | Med  | gm-money-web         | Most mutating Server Actions have no in-function auth check (middleware only) |
 | A6 | Med  | gm-money-web         | Client-supplied accountId/categoryId written without business-scope revalidation |
 | A7 | Med  | gm-money-web         | matchToBank can link the same bank row to two manual entries (no server guard) |
 | A8 | Med  | gm-money-web         | lib/settings.ts still uses Promise.all on the shared supabase client |
 | A9 | Med  | gm-money-web         | /api/ai/advice has no usage/cost rate limit and no timeout on the OpenAI call |
-| A10 | Med | app-script-backend   | GMDash sign-vs-category income/expense (known bug, still present) |
-| A11 | Med | app-script-backend   | Sheets-UI saves take no script lock → double-append/lost-update on concurrent saves |
-| A12 | Med | app-script-backend   | Old API dashboard cache not invalidated by sheet-side writes (5-min stale) |
-| A13 | Med | app-script-backend   | 15-second full-field duplicate gate silently discards a legitimate identical repeat |
-| A14 | Med | app-script-backend   | "Needs Review" status counted as Cleared in Register running-balance walk |
-| A15 | Med | app-script-backend   | Scheduled catch-up capped at 24 backfill iterations per run (docs claim 180 — stale) |
+| A10 | N/A* | app-script-backend   | GMDash sign-vs-category income/expense (known bug; old dashboard unused) |
+| A11 | N/A* | app-script-backend   | Sheets-UI saves take no script lock → double-append/lost-update (no human UI use) |
+| A12 | N/A* | app-script-backend   | Old API dashboard cache not invalidated by sheet-side writes (dashboard unused) |
+| A13 | N/A* | app-script-backend   | 15-second full-field duplicate gate discards a legitimate identical repeat (Entry UI unused) |
+| A14 | N/A* | app-script-backend   | "Needs Review" status counted as Cleared in Register running-balance walk (Register unused) |
+| A15 | N/A* | app-script-backend   | Scheduled catch-up capped at 24 backfill iterations per run (docs claim 180 — stale) |
 | A16 | Low | gm-money-web         | Login lockout counter never decays — account can be re-locked indefinitely |
 | A17 | Low | gm-money-web         | Scheduled/autopost errors collected but never surfaced to the user |
 | A18 | Low | gm-money-web         | Recurring schedules still reject refund-on-expense (recurring-only H1 case) |
 | A19 | Low | gm-money-web         | Tiller date-drift update can rewrite a pre-CUTOFF row into the current window |
 | A20 | Low | gm-money-web         | Advisor Panel fetch endpoints lack error handling → permanently stuck loading |
 
+`* N/A` = human-facing old system is not in use; auto ingestion (`TillerSync.gs`) only.
+
 ---
 
-## 1. High findings
+## 1. Old-system human-UI findings (all N/A — no human interaction; listed for completeness)
 
 ### A1. Sheet-UI manual entry writes Subcategory into a legacy "Business Area" column; the data is silently lost
 **file:** `app-script-backend/Entry.gs:855,860,915` — **[verified]**
@@ -97,7 +103,7 @@ screen's picker and then fails server-side.
 
 ---
 
-## 2. Old-system (app-script-backend) medium findings
+## 2. Old-system (app-script-backend) medium findings — all N/A* (human UI unused)
 
 - **A10 (GMDash sign-vs-category income/expense).** `Dashboard.gs:~385-389`: a
   refund (positive amount) on an Expense category counts as **Income**; the old
@@ -237,7 +243,10 @@ findings above are latent code/defense gaps plus deferred old-system bugs.**
 
 ---
 
-## 6. Recommended priorities
+## 6. Recommended priorities (updated for Tiller-only old system)
+
+The old-system items (A1–A4, A10–A15) are **dropped** — no human uses them.
+Remaining actionable set, in order:
 
 1. A5 — in-function auth on every transaction action (cheap, closes the
    middleware-only gap)
@@ -246,7 +255,7 @@ findings above are latent code/defense gaps plus deferred old-system bugs.**
 3. A8 — sequential settings queries
 4. A9 — throttle + `AbortSignal.timeout()` on `/api/ai/advice`
 5. A19 — floor the tiller-sync window at CUTOFF_DATE
-6. If the old system is still in use: A1 (Subcategory column), A2 (key
-   collision), A10 (dashboard sign), A11 (script lock), A15 (24 vs 180)
+6. A16–A18, A20 — small correctness/usability fixes (lockout decay, surface
+   autopost errors, recurring refunds, advisor error handling)
 
 *End of audit.*
