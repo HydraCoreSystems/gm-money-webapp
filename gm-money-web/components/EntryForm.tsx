@@ -32,28 +32,14 @@ export function EntryForm({
   const [recurringAutoCreate, setRecurringAutoCreate] = useState(true);
   const [isPending, startTransition] = useTransition();
 
-  // The server already rejects a sign/category mismatch outright (see
-  // createTransaction's validation) -- this just does that correction
-  // proactively so the user never has to notice and manually flip a
-  // sign themselves. Applied at two discrete moments (category change,
-  // amount blur) rather than on every keystroke, so it can't fight an
-  // in-progress amount while someone's still typing it.
-  function signCorrected(raw: string, type: "income" | "expense" | undefined | null): string {
-    const trimmed = raw.trim();
-    if (!trimmed || !type) return raw;
-    const num = Number(trimmed);
-    if (!Number.isFinite(num) || num === 0) return raw;
-    const corrected = type === "income" ? Math.abs(num) : -Math.abs(num);
-    return corrected === num ? raw : String(corrected);
-  }
-
+  // The category's type classifies a transaction for totals/charts but
+  // must NOT force the sign of the amount: a refund on an expense
+  // category is a legitimate, documented case (positive amount, still
+  // expense). The server no longer rejects sign/category mismatches (see
+  // app/entry/actions.ts), so nothing here auto-flips the sign either --
+  // what the user types is what gets stored.
   function handleSelectionChange(sel: Selection | null) {
     setSelection(sel);
-    setAmount((prev) => signCorrected(prev, sel?.type));
-  }
-
-  function handleAmountBlur() {
-    setAmount((prev) => signCorrected(prev, selection?.type));
   }
 
   async function handleSubmit(formData: FormData) {
@@ -126,7 +112,6 @@ export function EntryForm({
               placeholder="42.50"
               value={amount}
               onChange={(e) => setAmount(e.target.value)}
-              onBlur={handleAmountBlur}
               required
             />
           </div>
@@ -141,7 +126,7 @@ export function EntryForm({
           allowCreate
         />
         <p className="gm-category-picker__hint" style={{ marginTop: -12, marginBottom: 16 }}>
-          Expense amounts are entered as negative, Income as positive -- picking a category sets this automatically.
+          Enter expenses as negative and income as positive. A refund on an expense category is entered positive -- it still counts against that category's spending.
         </p>
 
         <div className="gm-form-grid gm-form-grid--two">

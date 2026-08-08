@@ -115,10 +115,12 @@ export async function createSubcategory(
 
 // Category is the ONLY thing that determines Income vs Expense -- never a
 // client-supplied field. The category's type is looked up server-side and
-// used purely to validate the entered amount's sign is consistent with it
-// (matching the old app's buildTransactionValues_ invariant); the actual
-// signed amount typed by the user is stored as-is, same convention this
-// schema already uses (negative = expense, positive = income).
+// used purely to classify the transaction in totals/charts, NOT to
+// constrain the amount's sign: per the data model, a refund on an expense
+// category is still an expense-category transaction (it should net against
+// that category's spending) even though its amount is positive. Bank-fed
+// refunds already flow through review with no sign check at all, so manual
+// entry must behave the same way.
 export async function createTransaction(formData: FormData): Promise<CreateTransactionResult> {
   const date = String(formData.get("date") || "");
   const accountId = String(formData.get("accountId") || "");
@@ -158,13 +160,6 @@ export async function createTransaction(formData: FormData): Promise<CreateTrans
   const amount = Number(amountText);
   if (!isFinite(amount) || amount === 0) {
     return { ok: false, error: "Amount must be a non-zero number." };
-  }
-  const expectedSign = category.category_type === "income" ? 1 : -1;
-  if (Math.sign(amount) !== expectedSign) {
-    return {
-      ok: false,
-      error: `That category is ${category.category_type}, so the amount should be ${expectedSign > 0 ? "positive" : "negative"}.`,
-    };
   }
 
   if (createRecurring && recurringLimit !== null && (!Number.isInteger(recurringLimit) || recurringLimit <= 0)) {

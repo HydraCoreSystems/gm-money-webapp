@@ -42,14 +42,9 @@ function resolveSelection(leafCategoryId: string | null, groups: CategoryGroupOp
   return null;
 }
 
-function signCorrected(raw: string, type: "income" | "expense" | undefined | null): string {
-  const trimmed = raw.trim();
-  if (!trimmed || !type) return raw;
-  const num = Number(trimmed);
-  if (!Number.isFinite(num) || num === 0) return raw;
-  const corrected = type === "income" ? Math.abs(num) : -Math.abs(num);
-  return corrected === num ? raw : String(corrected);
-}
+// No auto sign-correction here: the category's type classifies a
+// transaction for totals/charts, it does not force the sign. A refund on
+// an expense category is positive and that's exactly what's stored.
 
 export function RegisterEntryRow({
   entry,
@@ -84,11 +79,6 @@ export function RegisterEntryRow({
 
   function handleSelectionChange(sel: Selection | null) {
     setSelection(sel);
-    setAmount((prev) => signCorrected(prev, sel?.type));
-  }
-
-  function handleAmountBlur() {
-    setAmount((prev) => signCorrected(prev, selection?.type));
   }
 
   function handleSave() {
@@ -149,7 +139,6 @@ export function RegisterEntryRow({
                 step="0.01"
                 value={amount}
                 onChange={(e) => setAmount(e.target.value)}
-                onBlur={handleAmountBlur}
                 required
               />
             </div>

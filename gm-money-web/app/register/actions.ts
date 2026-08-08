@@ -60,11 +60,12 @@ export type UpdateTransactionResult = { ok: true } | { ok: false; error: string 
 
 // Lets a manual entry be corrected in place -- e.g. a mistyped dollar
 // amount -- instead of the only prior option (delete the wrong entry,
-// re-enter it from scratch). Same category/sign invariant as
-// createTransaction (app/entry/actions.ts): the category alone determines
-// Income/Expense, never a client-supplied flag, and the two must always
-// agree. Bank-fed and schedule-generated rows aren't editable here for the
-// same reasons they aren't deletable here (see deleteManualTransaction).
+// re-enter it from scratch). The category alone determines Income/Expense
+// classification, never a client-supplied flag. The category's type does
+// NOT constrain the amount's sign, though: a refund on an expense
+// category is a legitimate, documented case (positive amount, still an
+// expense-category transaction). Bank-fed rows aren't editable here for
+// the same reasons they aren't deletable here (see deleteManualTransaction).
 export async function updateManualTransaction(formData: FormData): Promise<UpdateTransactionResult> {
   await requireAuthenticatedUser();
 
@@ -110,13 +111,6 @@ export async function updateManualTransaction(formData: FormData): Promise<Updat
   const amount = Number(amountText);
   if (!isFinite(amount) || amount === 0) {
     return { ok: false, error: "Amount must be a non-zero number." };
-  }
-  const expectedSign = category.category_type === "income" ? 1 : -1;
-  if (Math.sign(amount) !== expectedSign) {
-    return {
-      ok: false,
-      error: `That category is ${category.category_type}, so the amount should be ${expectedSign > 0 ? "positive" : "negative"}.`,
-    };
   }
 
   const { error: updateError } = await supabase
