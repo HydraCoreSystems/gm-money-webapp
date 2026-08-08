@@ -3,14 +3,14 @@ import { processDueScheduledTransactions } from "./scheduled";
 import { computeAdjustedAccountBalance } from "./register";
 
 // Per the owner's explicit instruction: nothing before this date should
-// be considered "current" activity. The 2+ years of pre-existing history
-// that was originally migrated has since been purged outright (2026-07-26)
-// for a clean slate -- this filter is now mostly a no-op safety net rather
-// than the thing doing the real work, but kept in case older rows ever
-// reappear (e.g. a stale Tiller row synced late). This does NOT affect
-// account balances (those are real point-in-time snapshots, unaffected by
-// which transactions we choose to display).
-export const CUTOFF_DATE = "2026-07-19";
+// be considered "current" activity. Originally 2026-07-19; moved forward
+// to 2026-08-01 on 2026-08-08 for a second clean slate after a Tiller
+// sync bug (date-drift duplicate transactions) muddied the history in
+// between. This does NOT affect account balances (those are real
+// point-in-time snapshots, unaffected by which transactions we choose to
+// display) -- confirmed no uncleared transactions exist before this date,
+// so nothing pending is being hidden either.
+export const CUTOFF_DATE = "2026-08-01";
 const CHART_DAY_WINDOW = 30;
 
 // Floored at CUTOFF_DATE, same pattern as chartWindowStart() below --

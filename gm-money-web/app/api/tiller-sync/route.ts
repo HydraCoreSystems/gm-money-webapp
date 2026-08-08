@@ -11,7 +11,7 @@ const SHARED_SECRET = process.env.TILLER_SYNC_SECRET;
 // deliberately purged for a clean slate (exactly what happened once
 // already: a 60-day sender window quietly brought back 166 pre-cutoff
 // rows within a couple of sync cycles).
-const CUTOFF_DATE = "2026-07-19";
+const CUTOFF_DATE = "2026-08-01";
 
 type IncomingPayload = {
   accountName?: string;

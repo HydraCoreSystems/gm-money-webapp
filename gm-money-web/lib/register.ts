@@ -1,6 +1,17 @@
 import { getSupabaseServerClient, getBusinessId } from "./supabase";
 import { processDueScheduledTransactions } from "./scheduled";
 
+// Kept in sync with lib/dashboard.ts / lib/review.ts / the tiller-sync
+// route's CUTOFF_DATE -- see lib/dashboard.ts's comment for the full
+// rationale. Applied here only to the final displayed entries list, NOT
+// to the underlying query or the running-balance walk below: those still
+// need the complete history to anchor correctly off the real bank
+// balance. Slicing the query itself would also silently drop the bank
+// side of any manual/bank match pair that straddles the cutoff (a real
+// entry hidden with no visible counterpart) -- filtering only the final
+// list sidesteps that entirely.
+const CUTOFF_DATE = "2026-08-01";
+
 type RawTransaction = {
   id: string;
   transaction_date: string;
@@ -245,13 +256,18 @@ export async function getRegisterData(accountId?: string): Promise<RegisterData>
   // This, not the raw bank figure, is what "Current Balance" means here.
   const adjustedBalance = runningBalance;
 
-  entries.reverse(); // most recent first, matching the old app's Register display order
+  // Owner's explicit clean-slate request (2026-08-08, after the Tiller
+  // duplicate-transaction bug muddied the older history): hide everything
+  // before CUTOFF_DATE from what's displayed. currentBalance above is
+  // already computed from the full walk, so this slice doesn't change it.
+  const visibleEntries = entries.filter((e) => e.date >= CUTOFF_DATE);
+  visibleEntries.reverse(); // most recent first, matching the old app's Register display order
 
   return {
     accountId: account.id,
     accountName: account.name,
     currentBalance: adjustedBalance,
-    entries,
+    entries: visibleEntries,
   };
 }
 
