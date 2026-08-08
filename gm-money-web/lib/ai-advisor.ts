@@ -266,25 +266,38 @@ async function askOpenAI(question: string, contextJson: string): Promise<AiAdvic
 
   const model = getEnv("OPENAI_MODEL") ?? "gpt-4o-mini";
 
-  const response = await fetch("https://api.openai.com/v1/chat/completions", {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      Authorization: `Bearer ${apiKey}`,
-    },
-    body: JSON.stringify({
-      model,
-      temperature: 0.2,
-      response_format: { type: "json_object" },
-      messages: [
-        { role: "system", content: buildSystemPrompt() },
-        {
-          role: "user",
-          content: `Business context JSON:\n${contextJson}\n\nRespond as instructed.`,
-        },
-      ],
-    }),
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30_000);
+  let response: Response;
+  try {
+    response = await fetch("https://api.openai.com/v1/chat/completions", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        Authorization: `Bearer ${apiKey}`,
+      },
+      body: JSON.stringify({
+        model,
+        temperature: 0.2,
+        response_format: { type: "json_object" },
+        messages: [
+          { role: "system", content: buildSystemPrompt() },
+          {
+            role: "user",
+            content: `Business context JSON:\n${contextJson}\n\nRespond as instructed.`,
+          },
+        ],
+      }),
+      signal: controller.signal,
+    });
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") {
+      throw new Error("OpenAI request timed out after 30 seconds.");
+    }
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!response.ok) {
     const body = await response.text();
@@ -323,7 +336,36 @@ async function askOpenAI(question: string, contextJson: string): Promise<AiAdvic
   };
 }
 
+const RATE_LIMIT_MAX_PER_HOUR = 10;
+
+// Each advisor question is a real, billed OpenAI API call -- cap how many
+// a business can fire in an hour so a UI bug, retry loop, or someone
+// leaving the panel open can't run up an unbounded bill. Backed by
+// ai_advice_log (already business_id + created_at indexed) rather than
+// in-memory state, since this runs across separate serverless instances
+// that don't share memory.
+async function assertUnderAdviceRateLimit(businessId: string): Promise<void> {
+  const supabase = getSupabaseServerClient();
+  const since = new Date(Date.now() - 60 * 60 * 1000).toISOString();
+  const { count, error } = await supabase
+    .from("ai_advice_log")
+    .select("id", { count: "exact", head: true })
+    .eq("business_id", businessId)
+    .gte("created_at", since);
+
+  if (error) {
+    if (isMissingAdviceLogTable(error) || isAdviceLogAccessDenied(error)) return;
+    throw new Error(error.message);
+  }
+
+  if ((count ?? 0) >= RATE_LIMIT_MAX_PER_HOUR) {
+    throw new Error(`You've hit the AI advisor's limit of ${RATE_LIMIT_MAX_PER_HOUR} questions per hour. Try again shortly.`);
+  }
+}
+
 export async function generateAiAdvice(question: string): Promise<AiAdviceResult> {
+  const businessId = await getBusinessId();
+  await assertUnderAdviceRateLimit(businessId);
   const history = await getRecentAiAdvice();
   const contextJson = await buildBusinessContext(question, history);
   const result = await askOpenAI(question, contextJson);
