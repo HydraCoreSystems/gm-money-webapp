@@ -236,8 +236,20 @@ export async function processDueScheduledTransactions(todayDate = toDateKey(new 
           created_at: now,
           updated_at: now,
         });
-        if (createError) throw new Error(createError.message);
-        result.createdTransactions += 1;
+        // The select above normally prevents a duplicate occurrence, but
+        // it is not race-proof (two overlapping invocations could both
+        // pass it before either inserts). The partial unique index on
+        // (business_id, schedule_id, transaction_date) where schedule_id
+        // is not null is the real backstop: a unique violation means
+        // another invocation already created this occurrence, so count it
+        // as created rather than failing the whole loop.
+        if (createError && (createError.code === "23505" || String(createError.message).toLowerCase().includes("duplicate key"))) {
+          result.createdTransactions += 1;
+        } else if (createError) {
+          throw new Error(createError.message);
+        } else {
+          result.createdTransactions += 1;
+        }
       }
 
       occurrencesGenerated += 1;
