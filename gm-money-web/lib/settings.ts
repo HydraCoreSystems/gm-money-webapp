@@ -16,17 +16,22 @@ export async function getSettingsData(): Promise<SettingsData> {
   const supabase = getSupabaseServerClient();
   const businessId = await getBusinessId();
 
-  const [{ data: categoryRows, error: categoryError }, { data: budgetRows, error: budgetError }] = await Promise.all([
-    supabase
-      .from("categories")
-      .select("id, parent_id, name, category_type, sort_order")
-      .eq("business_id", businessId)
-      .eq("is_active", true)
-      .order("sort_order"),
-    supabase.from("budgets").select("id, category_id, amount").eq("business_id", businessId).order("created_at", { ascending: false }),
-  ]);
-
+  // Sequential, not Promise.all -- the same concurrent-Supabase-query bug
+  // documented in lib/register.ts (silent empty/wrong results from
+  // parallel calls on one client instance) applies here too.
+  const { data: categoryRows, error: categoryError } = await supabase
+    .from("categories")
+    .select("id, parent_id, name, category_type, sort_order")
+    .eq("business_id", businessId)
+    .eq("is_active", true)
+    .order("sort_order");
   if (categoryError) throw new Error(categoryError.message);
+
+  const { data: budgetRows, error: budgetError } = await supabase
+    .from("budgets")
+    .select("id, category_id, amount")
+    .eq("business_id", businessId)
+    .order("created_at", { ascending: false });
   if (budgetError) throw new Error(budgetError.message);
 
   const rows = (categoryRows ?? []) as Array<{ id: string; parent_id: string | null; name: string; category_type: string }>;
