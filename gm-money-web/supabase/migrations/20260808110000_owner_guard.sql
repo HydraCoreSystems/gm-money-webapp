@@ -67,21 +67,21 @@ begin
   perform pg_advisory_xact_lock(hashtextextended('gm_money_owner:' || p_business_id::text, 0));
 
   if exists (
-    select 1 from gm_money.app_users
-    where business_id = p_business_id
-      and role = 'owner'
-      and is_active = true
+    select 1 from gm_money.app_users as existing_owner
+    where existing_owner.business_id = p_business_id
+      and existing_owner.role = 'owner'
+      and existing_owner.is_active = true
   ) then
     raise exception 'GM_OWNER_EXISTS';
   end if;
 
   return query
-    insert into gm_money.app_users (
+    insert into gm_money.app_users as new_owner (
       business_id, email, display_name, password_hash, role, is_active, created_at, updated_at
     )
     values (
       p_business_id, p_email, p_display_name, p_password_hash, 'owner', true, now(), now()
     )
-    returning id, email, display_name, role::text;
+    returning new_owner.id, new_owner.email, new_owner.display_name, new_owner.role::text;
 end;
 $$;
