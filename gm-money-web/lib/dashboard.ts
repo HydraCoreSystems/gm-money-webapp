@@ -163,21 +163,22 @@ export async function getDashboardData(): Promise<DashboardData> {
   // matches the old app's real definition: "new bank transactions land
   // here until they're given a category"). Both counts scoped to the
   // owner's July-1-onward cutoff, same as everything else on this screen.
-  const [{ count: pendingReviewCount }, { count: unclearedCount }] = await Promise.all([
-    supabase
-      .from("transactions")
-      .select("id", { count: "exact", head: true })
-      .eq("business_id", businessId)
-      .eq("source", "tiller")
-      .is("category_id", null)
-      .gte("transaction_date", CUTOFF_DATE),
-    supabase
-      .from("transactions")
-      .select("id", { count: "exact", head: true })
-      .eq("business_id", businessId)
-      .eq("status", "uncleared")
-      .gte("transaction_date", CUTOFF_DATE),
-  ]);
+  // Sequential, not Promise.all -- the concurrent-Supabase-query bug
+  // documented in lib/register.ts (silent empty/wrong results from
+  // parallel calls on one client instance) applies here too.
+  const { count: pendingReviewCount } = await supabase
+    .from("transactions")
+    .select("id", { count: "exact", head: true })
+    .eq("business_id", businessId)
+    .eq("source", "tiller")
+    .is("category_id", null)
+    .gte("transaction_date", CUTOFF_DATE);
+  const { count: unclearedCount } = await supabase
+    .from("transactions")
+    .select("id", { count: "exact", head: true })
+    .eq("business_id", businessId)
+    .eq("status", "uncleared")
+    .gte("transaction_date", CUTOFF_DATE);
 
   const { data: recent, error: recentError } = await supabase
     .from("transactions")
