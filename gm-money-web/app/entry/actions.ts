@@ -149,11 +149,21 @@ export async function createTransaction(formData: FormData): Promise<CreateTrans
   const { data: category, error: categoryError } = await supabase
     .from("categories")
     .select("category_type")
+    .eq("business_id", businessId)
     .eq("id", leafCategoryId)
     .single();
   if (categoryError || !category) {
     return { ok: false, error: "Could not look up that category's type." };
   }
+
+  const { data: account, error: accountError } = await supabase
+    .from("accounts")
+    .select("id")
+    .eq("business_id", businessId)
+    .eq("id", accountId)
+    .maybeSingle();
+  if (accountError) return { ok: false, error: accountError.message };
+  if (!account) return { ok: false, error: "Could not find that account." };
 
   const amount = Number(amountText);
   if (!isFinite(amount) || amount === 0) {

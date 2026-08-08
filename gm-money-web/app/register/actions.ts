@@ -101,6 +101,7 @@ export async function updateManualTransaction(formData: FormData): Promise<Updat
   const { data: category, error: categoryError } = await supabase
     .from("categories")
     .select("category_type")
+    .eq("business_id", businessId)
     .eq("id", leafCategoryId)
     .single();
   if (categoryError || !category) {
