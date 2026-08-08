@@ -181,6 +181,21 @@ export async function matchToBank(formData: FormData): Promise<MatchTransactionR
     return { ok: false, error: "Not a valid bank transaction." };
   }
 
+  // Guard against double-linking: either side of a match must be unused,
+  // otherwise two manual entries could both get marked cleared against the
+  // same real bank amount, double-counting it in the register's running
+  // balance. A unique constraint on transaction_matches backs this up at
+  // the DB layer too, but check here first for a clean error message.
+  const { data: existingMatches, error: existingMatchError } = await supabase
+    .from("transaction_matches")
+    .select("manual_transaction_id, bank_transaction_id")
+    .eq("business_id", businessId)
+    .or(`manual_transaction_id.eq.${manualId},bank_transaction_id.eq.${bankId}`);
+  if (existingMatchError) return { ok: false, error: existingMatchError.message };
+  if (existingMatches && existingMatches.length > 0) {
+    return { ok: false, error: "One of these transactions is already matched to something else." };
+  }
+
   const { error: matchError } = await supabase.from("transaction_matches").insert({
     business_id: businessId,
     manual_transaction_id: manualId,
