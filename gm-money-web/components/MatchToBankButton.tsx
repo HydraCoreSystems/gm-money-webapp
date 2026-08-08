@@ -18,8 +18,10 @@ function formatMoneySigned(amount: number): string {
 // Renders the actual suspected-duplicate bank row -- not just a sentence
 // describing it -- so confirming a match means comparing two real rows,
 // not trusting a text description of one you can't see. The amount here
-// is never added to the running balance above; it's a read-only preview
-// of the bank row still hidden from the real ledger until confirmed.
+// is a read-only preview of the bank row that is ALSO shown separately in
+// the Register (unconfirmed candidates are never hidden); confirming
+// links them permanently and finally removes the bank row from the
+// ledger.
 export function MatchToBankButton({ manualId, accountId, candidate }: Props) {
   const [error, setError] = useState("");
   const [isPending, startTransition] = useTransition();
@@ -41,7 +43,7 @@ export function MatchToBankButton({ manualId, accountId, candidate }: Props) {
 
   return (
     <div className="gm-register-row__match">
-      <div className="gm-register-row__match-label">Possible match for the entry above -- not yet counted in your balance</div>
+      <div className="gm-register-row__match-label">Possible match for the entry above -- still shown separately in your balance until confirmed</div>
       <div className="gm-register-row__match-preview">
         <div className="gm-register-row__match-main">
           <div className="gm-register-row__payee">{candidate.description}</div>

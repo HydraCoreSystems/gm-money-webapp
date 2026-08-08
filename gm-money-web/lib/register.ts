@@ -48,9 +48,11 @@ export type RegisterEntry = {
   notes: string | null;
   runningBalance: number;
   // Set only for an unmatched manual entry the heuristic below thinks
-  // corresponds to a specific visible-elsewhere-hidden bank row -- lets
-  // the UI offer "confirm this match" instead of leaving it stuck
-  // Uncleared forever with no path to reconciliation.
+  // corresponds to a specific bank row -- lets the UI offer "confirm this
+  // match" (which records transaction_matches and finally clears & hides
+  // the bank row) instead of leaving the manual entry stuck Uncleared
+  // forever with no path to reconciliation. Until the user confirms, the
+  // candidate bank row remains its own visible Register line.
   matchCandidate: MatchCandidate | null;
 };
 
@@ -68,11 +70,39 @@ export type RegisterData = {
 // meaningful (3+ letters) word from the manual payee too, matching the
 // spirit of the old app's normalizeMerchantKey_-style matching without
 // needing a full port of that exact algorithm.
+//
+// Common English filler words and near-universal Tiller-description
+// fragments ("the", "and", "for", "pay", "vis", "pos", "debit", "card",
+// "purchase", "online" appear in most bank descriptions and mean nothing
+// as a merchant signal) are excluded so two unrelated transactions that
+// happen to share an amount and one filler word can't be falsely paired.
+const MERCHANT_STOPWORDS = new Set([
+  "the",
+  "and",
+  "for",
+  "you",
+  "was",
+  "has",
+  "not",
+  "with",
+  "this",
+  "are",
+  "pay",
+  "vis",
+  "visa",
+  "pos",
+  "debit",
+  "card",
+  "purchase",
+  "online",
+  "from",
+  "your",
+]);
 function normalizedWords(text: string): string[] {
   return text
     .toLowerCase()
     .split(/[^a-z0-9]+/)
-    .filter((w) => w.length >= 3);
+    .filter((w) => w.length >= 3 && !MERCHANT_STOPWORDS.has(w));
 }
 
 function looksLikeSameMerchant(manualDescription: string, bankDescription: string): boolean {
@@ -85,44 +115,55 @@ const DAY_MS = 24 * 60 * 60 * 1000;
 
 type DedupeResult = {
   visible: RawTransaction[];
-  // Manual entries with an unconfirmed heuristic bank match -- the bank
-  // row is already hidden below, but nothing has permanently recorded
-  // the pairing yet, so the manual entry is still sitting Uncleared.
+  // Manual entries with an unconfirmed heuristic bank match -- surfaced
+  // only as a "possible match" suggestion on the manual entry (the bank
+  // row stays visible in the Register until the user explicitly confirms
+  // via matchToBank, which then removes it).
   candidateByManualId: Map<string, RawTransaction>;
 };
 
 // Dedup: a manual (sheet_manual) entry and its matching bank (tiller) row
 // represent ONE real-world transaction -- the bank row must never also
 // appear, exactly like the old app's "Matched Bank Key" rule. Uses
-// explicit transaction_matches links first (authoritative), then a
-// same-account/same-amount/within-7-days/shared-word heuristic for pairs
-// nothing has explicitly matched yet.
+// explicit transaction_matches links first (authoritative). For pairs
+// nothing has explicitly matched yet, a same-account/same-amount/
+// within-7-days/shared-word heuristic finds a *candidate* bank row, but
+// that candidate is NOT hidden from the Register: until a user confirms
+// the pairing, the bank row keeps its own line and its cleared amount
+// stays in clearedSum. Hiding a real bank transaction based on an
+// unconfirmed heuristic match is exactly how a real charge can silently
+// vanish from the ledger and skew every running balance after it.
 function dedupe(rows: RawTransaction[], explicitBankIdsToHide: Set<string>, explicitlyMatchedManualIds: Set<string>): DedupeResult {
   const manual = rows.filter((r) => r.source === "sheet_manual");
   const bank = rows.filter((r) => r.source === "tiller");
   const hiddenBankIds = new Set(explicitBankIdsToHide);
   const candidateByManualId = new Map<string, RawTransaction>();
+  // Bank rows can claim at most one manual candidate, so a single bank
+  // row is not surfaced as the tentative match for two different manual
+  // entries even if both share an amount and a word.
+  const claimedBankIds = new Set<string>();
 
   for (const m of manual) {
     if (explicitlyMatchedManualIds.has(m.id)) continue; // already permanently reconciled
-    if (hiddenBankIds.size === bank.length) break;
     const mTime = new Date(m.transaction_date).getTime();
     for (const b of bank) {
-      if (hiddenBankIds.has(b.id)) continue;
+      if (hiddenBankIds.has(b.id) || claimedBankIds.has(b.id)) continue;
       if (Number(b.amount) !== Number(m.amount)) continue;
       const bTime = new Date(b.transaction_date).getTime();
       // Real observed bank-posting lag in this data runs ~4 days between
       // a manual entry's date and Tiller's recorded date for the same
-      // real purchase -- 7 days gives headroom without getting so wide
-      // it risks merging genuinely different transactions.
+      // real purchase -- 7 days gives enough headroom without getting so
+      // wide it risks merging genuinely different transactions.
       if (Math.abs(bTime - mTime) > 7 * DAY_MS) continue;
       if (!looksLikeSameMerchant(m.description, b.description)) continue;
-      hiddenBankIds.add(b.id);
+      claimedBankIds.add(b.id);
       candidateByManualId.set(m.id, b);
       break; // one bank row claimed per manual row
     }
   }
 
+  // Only explicitly-confirmed matches (transaction_matches rows) hide a
+  // bank row. Heuristic candidates received above stay visible.
   return {
     visible: rows.filter((r) => !hiddenBankIds.has(r.id)),
     candidateByManualId,
