@@ -210,6 +210,16 @@ export async function POST(request: NextRequest) {
       // so this stays scoped correctly even when accountId couldn't be
       // resolved (accountId is null in that case and the query below
       // simply finds nothing, same as before).
+      //
+      // The window match must be UNAMBIGUOUS for it to be treated as a
+      // date-drift correction. If more than one existing row shares this
+      // account+description+amount within the window, those are genuinely
+      // different real transactions (e.g. two same-amount purchases at the
+      // same merchant in the same week) -- updating one of them in place
+      // would silently merge the pair and lose a real transaction. In the
+      // ambiguous case we fall through to the exact-key upsert, which
+      // inserts a second row (the same outcome as a real duplicate-amount
+      // case; far less harmful than deleting one of two real transactions).
       let existingId: string | null = null;
       if (accountId) {
         const { data: nearby, error: nearbyError } = await supabase
@@ -222,11 +232,11 @@ export async function POST(request: NextRequest) {
           .gte("transaction_date", shiftDateString(date, -DUPLICATE_MATCH_WINDOW_DAYS))
           .lte("transaction_date", shiftDateString(date, DUPLICATE_MATCH_WINDOW_DAYS));
         if (nearbyError) throw nearbyError;
-        const match = (nearby ?? []).find(
-          (row: { id: string; description: string }) =>
-            row.description.trim().toLowerCase() === description.trim().toLowerCase(),
+        const normDescription = description.trim().toLowerCase();
+        const matches = (nearby ?? []).filter(
+          (row: { id: string; description: string }) => row.description.trim().toLowerCase() === normDescription,
         );
-        if (match) existingId = match.id;
+        if (matches.length === 1) existingId = matches[0].id;
       }
 
       if (existingId) {
