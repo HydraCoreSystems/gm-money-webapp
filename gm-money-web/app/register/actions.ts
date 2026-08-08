@@ -158,9 +158,15 @@ export async function matchToBank(formData: FormData): Promise<MatchTransactionR
   const supabase = getSupabaseServerClient();
   const businessId = await getBusinessId();
 
+  // Fetch account_id and amount alongside source so the pairing is
+  // re-validated server-side before it's recorded permanently -- the
+  // Register UI only ever offers same-account/same-amount candidates,
+  // but this Server Action can be called with arbitrary form data and
+  // must not record a false reconciliation that would be impossible to
+  // undo from the UI.
   const { data: rows, error: lookupError } = await supabase
     .from("transactions")
-    .select("id, source")
+    .select("id, source, account_id, amount")
     .eq("business_id", businessId)
     .in("id", [manualId, bankId]);
 
@@ -173,6 +179,12 @@ export async function matchToBank(formData: FormData): Promise<MatchTransactionR
   }
   if (!bankRow || bankRow.source !== "tiller") {
     return { ok: false, error: "Not a valid bank transaction." };
+  }
+  if (manualRow.account_id !== bankRow.account_id) {
+    return { ok: false, error: "The manual entry and bank transaction are in different accounts." };
+  }
+  if (Number(manualRow.amount) !== Number(bankRow.amount)) {
+    return { ok: false, error: "The manual entry and bank transaction amounts do not match." };
   }
 
   const { error: matchError } = await supabase.from("transaction_matches").insert({
