@@ -317,6 +317,28 @@ goal). Additions from this session:
    fresh if `next build`/`next dev` throws `EINVAL: invalid argument,
    readlink`. Prefer `npx tsc --noEmit` for quick type-checks over a full
    build when just verifying a small change.
+10. **RLS is enabled on every `gm_money` table but intentionally has zero
+    policies** (fixed 2026-08-08: 4 tables — `sync_events`,
+    `ai_advice_log`, `notification_recipients`, `app_users` — had RLS
+    disabled entirely until then, which is a real hole: the public anon
+    key, if one is ever issued, could read/write them directly). Real
+    `auth.uid()`-style RLS policies are **not meaningful for this app** —
+    login is fully custom (`lib/app-users.ts` + bcrypt + a self-signed
+    HMAC session cookie in `lib/session.ts`, see §2), not Supabase Auth,
+    so no request this app makes ever has a Supabase JWT/`auth.uid()`.
+    Every DB access path is server-side via `SUPABASE_SERVICE_ROLE_KEY`
+    (`lib/supabase.ts`), which bypasses RLS regardless of policies, and no
+    `NEXT_PUBLIC_SUPABASE_ANON_KEY` is published anywhere in the app. Row
+    scoping is enforced entirely in application code instead
+    (`getBusinessId()` + `.eq("business_id", ...)` filters throughout
+    `lib/*.ts`). **Enabled-with-no-policy RLS is correct here** — it's
+    harmless defense-in-depth against a hypothetical future anon-key leak,
+    default-deny for every role except service_role. If real per-row
+    Postgres-level enforcement is ever wanted, the actual prerequisite is
+    migrating login to Supabase Auth (or minting scoped JWTs claiming
+    `app_users.id`/`role` and checking them via `current_setting()` in
+    policies) — not just adding policies on top of the current custom-auth
+    setup.
 
 ---
 
