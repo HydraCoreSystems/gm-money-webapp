@@ -8,6 +8,7 @@ import {
   processDueScheduledTransactions,
   validateScheduledAmountForCategory,
 } from "@/lib/scheduled";
+import { requireAuthenticatedUser } from "@/lib/auth-session";
 
 const REVALIDATE_PATHS = ["/", "/register", "/scheduled", "/dashboard"];
 
@@ -18,6 +19,8 @@ function revalidateScheduledRelatedPages() {
 }
 
 export async function createScheduled(formData: FormData) {
+  await requireAuthenticatedUser();
+
   const payee = String(formData.get("payee") || "").trim();
   const amount = Number(String(formData.get("amount") || ""));
   const accountId = String(formData.get("accountId") || "") || null;
@@ -70,6 +73,8 @@ export async function createScheduled(formData: FormData) {
 }
 
 export async function updateScheduled(id: string, formData: FormData) {
+  await requireAuthenticatedUser();
+
   const payee = String(formData.get("payee") || "").trim();
   const amount = Number(String(formData.get("amount") || ""));
   const accountId = String(formData.get("accountId") || "") || null;
@@ -122,6 +127,8 @@ export async function updateScheduled(id: string, formData: FormData) {
 }
 
 export async function removeScheduled(id: string) {
+  await requireAuthenticatedUser();
+
   try {
     await deleteScheduledTransaction(id);
   } catch (error) {
@@ -133,6 +140,8 @@ export async function removeScheduled(id: string) {
 }
 
 export async function runScheduledAutopostNow() {
+  await requireAuthenticatedUser();
+
   try {
     const stats = await processDueScheduledTransactions();
     revalidateScheduledRelatedPages();

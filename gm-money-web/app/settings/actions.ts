@@ -2,8 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { getSupabaseServerClient, getBusinessId } from "@/lib/supabase";
+import { requireAuthenticatedUser } from "@/lib/auth-session";
 
 export async function createCategory(formData: FormData) {
+  await requireAuthenticatedUser();
+
   const name = String(formData.get("name") || "").trim();
   const type = String(formData.get("type") || "expense");
   if (!name) return { ok: false, error: "Category name is required." };
@@ -27,6 +30,8 @@ export async function createCategory(formData: FormData) {
 }
 
 export async function createSubcategory(formData: FormData) {
+  await requireAuthenticatedUser();
+
   const parentId = String(formData.get("parentId") || "").trim();
   const name = String(formData.get("name") || "").trim();
   if (!parentId || !name) return { ok: false, error: "Parent category and subcategory name are required." };
@@ -50,6 +55,8 @@ export async function createSubcategory(formData: FormData) {
 }
 
 export async function setBudget(formData: FormData) {
+  await requireAuthenticatedUser();
+
   const categoryId = String(formData.get("categoryId") || "").trim();
   const amountText = String(formData.get("amount") || "").trim();
   if (!categoryId) return { ok: false, error: "Category is required." };
@@ -83,6 +90,8 @@ export async function setBudget(formData: FormData) {
 }
 
 export async function deleteBudget(formData: FormData) {
+  await requireAuthenticatedUser();
+
   const categoryId = String(formData.get("categoryId") || "").trim();
   if (!categoryId) return { ok: false, error: "Category is required." };
 

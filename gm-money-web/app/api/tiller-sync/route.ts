@@ -210,6 +210,14 @@ export async function POST(request: NextRequest) {
       // simply finds nothing, same as before).
       let existingId: string | null = null;
       if (accountId) {
+        // Floor the lookback at CUTOFF_DATE -- an incoming transaction
+        // dated within DUPLICATE_MATCH_WINDOW_DAYS of the cutoff would
+        // otherwise let this window reach below it and match/overwrite a
+        // pre-cutoff row still sitting in the table (CUTOFF_DATE only
+        // filters what displays, it was never a deletion), silently
+        // reviving it into the visible window under its old id.
+        const windowStart = shiftDateString(date, -DUPLICATE_MATCH_WINDOW_DAYS);
+        const flooredWindowStart = windowStart < CUTOFF_DATE ? CUTOFF_DATE : windowStart;
         const { data: nearby, error: nearbyError } = await supabase
           .from("transactions")
           .select("id, description")
@@ -217,7 +225,7 @@ export async function POST(request: NextRequest) {
           .eq("account_id", accountId)
           .eq("source", source)
           .eq("amount", amount)
-          .gte("transaction_date", shiftDateString(date, -DUPLICATE_MATCH_WINDOW_DAYS))
+          .gte("transaction_date", flooredWindowStart)
           .lte("transaction_date", shiftDateString(date, DUPLICATE_MATCH_WINDOW_DAYS));
         if (nearbyError) throw nearbyError;
         const match = (nearby ?? []).find(

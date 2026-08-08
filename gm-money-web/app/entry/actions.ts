@@ -5,6 +5,7 @@ import { getSupabaseServerClient, getBusinessId } from "@/lib/supabase";
 import { cookies } from "next/headers";
 import { ENTERED_BY_COOKIE_NAME } from "@/lib/session";
 import { createScheduledTransaction, validateScheduledAmountForCategory } from "@/lib/scheduled";
+import { requireAuthenticatedUser } from "@/lib/auth-session";
 
 export type CreateTransactionResult =
   | { ok: true; id: string; recurringCreated: boolean; recurringError?: string }
@@ -21,6 +22,8 @@ function revalidateCategoryPages() {
 export async function createCategory(
   formData: FormData,
 ): Promise<{ ok: true; category: { id: string; name: string; type: "income" | "expense" } } | { ok: false; error: string }> {
+  await requireAuthenticatedUser();
+
   const name = String(formData.get("name") || "").trim();
   const type = String(formData.get("type") || "expense");
 
@@ -66,6 +69,8 @@ export async function createSubcategory(
   | { ok: true; subcategory: { id: string; name: string; parentId: string; type: "income" | "expense" } }
   | { ok: false; error: string }
 > {
+  await requireAuthenticatedUser();
+
   const parentId = String(formData.get("parentId") || "").trim();
   const name = String(formData.get("name") || "").trim();
 
@@ -120,6 +125,8 @@ export async function createSubcategory(
 // signed amount typed by the user is stored as-is, same convention this
 // schema already uses (negative = expense, positive = income).
 export async function createTransaction(formData: FormData): Promise<CreateTransactionResult> {
+  await requireAuthenticatedUser();
+
   const date = String(formData.get("date") || "");
   const accountId = String(formData.get("accountId") || "");
   const payee = String(formData.get("payee") || "").trim();
@@ -149,11 +156,21 @@ export async function createTransaction(formData: FormData): Promise<CreateTrans
   const { data: category, error: categoryError } = await supabase
     .from("categories")
     .select("category_type")
+    .eq("business_id", businessId)
     .eq("id", leafCategoryId)
     .single();
   if (categoryError || !category) {
     return { ok: false, error: "Could not look up that category's type." };
   }
+
+  const { data: account, error: accountError } = await supabase
+    .from("accounts")
+    .select("id")
+    .eq("business_id", businessId)
+    .eq("id", accountId)
+    .maybeSingle();
+  if (accountError) return { ok: false, error: accountError.message };
+  if (!account) return { ok: false, error: "Could not find that account." };
 
   const amount = Number(amountText);
   if (!isFinite(amount) || amount === 0) {

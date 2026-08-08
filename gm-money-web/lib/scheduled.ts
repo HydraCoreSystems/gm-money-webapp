@@ -339,6 +339,19 @@ export async function getScheduledTransactions(): Promise<ScheduledTransaction[]
   }));
 }
 
+async function assertAccountBelongsToBusiness(accountId: string | null, businessId: string): Promise<void> {
+  if (!accountId) return;
+  const supabase = getSupabaseServerClient();
+  const { data: account, error } = await supabase
+    .from("accounts")
+    .select("id")
+    .eq("business_id", businessId)
+    .eq("id", accountId)
+    .maybeSingle();
+  if (error) throw new Error(error.message);
+  if (!account) throw new Error("Could not find that account.");
+}
+
 export async function createScheduledTransaction(input: {
   payee: string;
   amount: number;
@@ -354,6 +367,7 @@ export async function createScheduledTransaction(input: {
 }): Promise<void> {
   const supabase = getSupabaseServerClient();
   const businessId = await getBusinessId();
+  await assertAccountBelongsToBusiness(input.accountId, businessId);
   const { error } = await supabase.from("recurring_transactions").insert({
     business_id: businessId,
     account_id: input.accountId,
@@ -392,6 +406,7 @@ export async function updateScheduledTransaction(id: string, input: {
 }): Promise<void> {
   const supabase = getSupabaseServerClient();
   const businessId = await getBusinessId();
+  await assertAccountBelongsToBusiness(input.accountId, businessId);
   const { error } = await supabase.from("recurring_transactions").update({
     payee: input.payee,
     amount: input.amount,

@@ -2,8 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { deleteMerchantRule, rebuildMerchantRules, saveMerchantRule, setMerchantRuleLock, type MerchantMemoryStatus } from "@/lib/merchant-memory";
+import { requireAuthenticatedUser } from "@/lib/auth-session";
 
 export async function updateMerchantMemory(formData: FormData) {
+  await requireAuthenticatedUser();
+
   const merchantKey = String(formData.get("merchantKey") || "").trim();
   const preferredName = String(formData.get("preferredName") || "").trim();
   const categoryId = String(formData.get("categoryId") || "").trim();
@@ -24,6 +27,8 @@ export async function updateMerchantMemory(formData: FormData) {
 }
 
 export async function toggleMerchantLock(formData: FormData) {
+  await requireAuthenticatedUser();
+
   const merchantKey = String(formData.get("merchantKey") || "").trim();
   const locked = String(formData.get("locked") || "false") === "true";
 
@@ -42,6 +47,8 @@ export async function toggleMerchantLock(formData: FormData) {
 }
 
 export async function removeMerchantMemory(formData: FormData) {
+  await requireAuthenticatedUser();
+
   const merchantKey = String(formData.get("merchantKey") || "").trim();
   if (!merchantKey) {
     return { ok: false, error: "Merchant was not provided." };
@@ -58,6 +65,8 @@ export async function removeMerchantMemory(formData: FormData) {
 }
 
 export async function rebuildMerchantMemory() {
+  await requireAuthenticatedUser();
+
   try {
     await rebuildMerchantRules();
   } catch (error) {
