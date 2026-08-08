@@ -74,6 +74,27 @@ export async function createAppUser(input: {
   const businessId = await getBusinessId();
   const passwordHash = await bcrypt.hash(input.password, 10);
 
+  // /setup gates on getAppUserCount() === 0 before calling this, but that
+  // check and this insert are separate queries -- two overlapping /setup
+  // submissions could both pass the count check (audit finding L3). A
+  // partial unique index on app_users (business_id) where role='owner' is
+  // the real backstop; this pre-check just turns the DB violation into a
+  // clear error message instead of the generic "email already exists"
+  // guess (the index error carries no email, so the generic catch below
+  // would be misleading here).
+  if (input.role === "owner") {
+    const { count: existingOwnerCount, error: ownerCheckError } = await supabase
+      .from("app_users")
+      .select("id", { count: "exact", head: true })
+      .eq("business_id", businessId)
+      .eq("role", "owner")
+      .eq("is_active", true);
+    if (ownerCheckError) throw new Error(ownerCheckError.message);
+    if ((existingOwnerCount ?? 0) > 0) {
+      throw new Error("An owner already exists for this business.");
+    }
+  }
+
   const { data, error } = await supabase
     .from("app_users")
     .insert({
