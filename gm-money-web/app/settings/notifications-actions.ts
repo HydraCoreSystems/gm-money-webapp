@@ -2,8 +2,11 @@
 
 import { revalidatePath } from "next/cache";
 import { addNotificationRecipient, removeNotificationRecipient, updateNotificationRecipient, type NotificationPrefs } from "@/lib/notifications";
+import { requireAuthenticatedUser } from "@/lib/auth-session";
 
 export async function addRecipient(formData: FormData) {
+  await requireAuthenticatedUser();
+
   const name = String(formData.get("name") || "").trim();
   const email = String(formData.get("email") || "").trim();
 
@@ -20,6 +23,8 @@ export async function addRecipient(formData: FormData) {
 }
 
 export async function saveRecipient(formData: FormData) {
+  await requireAuthenticatedUser();
+
   const email = String(formData.get("email") || "").trim();
   const name = String(formData.get("name") || "").trim();
   const prefsText = String(formData.get("prefs") || "");
@@ -44,6 +49,8 @@ export async function saveRecipient(formData: FormData) {
 }
 
 export async function deleteRecipient(formData: FormData) {
+  await requireAuthenticatedUser();
+
   const email = String(formData.get("email") || "").trim();
   if (!email) return { ok: false, error: "Recipient email is required." };
 

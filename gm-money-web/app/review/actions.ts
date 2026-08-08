@@ -3,8 +3,11 @@
 import { revalidatePath } from "next/cache";
 import { getSupabaseServerClient, getBusinessId } from "@/lib/supabase";
 import { resolveLeafCategoryId } from "@/lib/review";
+import { requireAuthenticatedUser } from "@/lib/auth-session";
 
 export async function approveReviewTransaction(formData: FormData) {
+  await requireAuthenticatedUser();
+
   const transactionId = String(formData.get("transactionId") || "").trim();
   const categoryId = String(formData.get("categoryId") || "").trim();
   const subcategoryId = String(formData.get("subcategoryId") || "").trim();
