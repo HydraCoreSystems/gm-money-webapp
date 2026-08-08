@@ -190,3 +190,86 @@ export async function setAppUserActive(input: { userId: string; active: boolean 
     .eq("id", input.userId);
   if (error) throw new Error(error.message);
 }
+
+// Login rate-limiting (audit finding M4). Tracks failed login attempts
+// per (business_id, email) in gm_money.login_attempts so the login
+// Server Action can cap guesses -- bcrypt throttles each individual
+// attempt but nothing capped the total number of attempts before this.
+export type LoginAttemptState = {
+  failedAttempts: number;
+  lockedUntil: string | null;
+};
+
+const MAX_FAILED_LOGIN_ATTEMPTS = 5;
+const LOGIN_LOCKOUT_MINUTES = 15;
+
+function isLoginAttemptsTableMissing(error: { code?: string; message?: string }): boolean {
+  const text = `${error.code ?? ""} ${error.message ?? ""}`.toLowerCase();
+  return text.includes("login_attempts") && (text.includes("does not exist") || text.includes("42p01") || text.includes("pgrst"));
+}
+
+export async function getLoginAttemptState(email: string): Promise<LoginAttemptState> {
+  const supabase = getSupabaseServerClient();
+  const businessId = await getBusinessId();
+  const normalized = normalizeEmail(email);
+  const { data, error } = await supabase
+    .from("login_attempts")
+    .select("failed_attempts, locked_until")
+    .eq("business_id", businessId)
+    .eq("email", normalized)
+    .maybeSingle();
+  // Degrade to "no attempts" (fail-open, the pre-fix behavior) if the
+  // rate-limit table hasn't been created yet -- never let a missing
+  // bookkeeping table take down login for the whole business.
+  if (error && isLoginAttemptsTableMissing(error)) {
+    return { failedAttempts: 0, lockedUntil: null };
+  }
+  if (error) throw new Error(error.message);
+  return {
+    failedAttempts: Number(data?.failed_attempts ?? 0),
+    lockedUntil: data?.locked_until ? String(data.locked_until) : null,
+  };
+}
+
+export async function recordFailedLoginAttempt(email: string): Promise<void> {
+  const supabase = getSupabaseServerClient();
+  const businessId = await getBusinessId();
+  const normalized = normalizeEmail(email);
+
+  const { data: existing, error: readError } = await supabase
+    .from("login_attempts")
+    .select("failed_attempts")
+    .eq("business_id", businessId)
+    .eq("email", normalized)
+    .maybeSingle();
+  if (readError && isLoginAttemptsTableMissing(readError)) return; // fail-open without the table
+  if (readError) throw new Error(readError.message);
+
+  const nextCount = Number(existing?.failed_attempts ?? 0) + 1;
+  const now = new Date();
+  const lockedUntil = nextCount >= MAX_FAILED_LOGIN_ATTEMPTS ? new Date(now.getTime() + LOGIN_LOCKOUT_MINUTES * 60_000).toISOString() : null;
+
+  const { error } = await supabase.from("login_attempts").upsert(
+    {
+      business_id: businessId,
+      email: normalized,
+      failed_attempts: nextCount,
+      locked_until: lockedUntil,
+      updated_at: now.toISOString(),
+    },
+    { onConflict: "business_id,email" },
+  );
+  if (error && !isLoginAttemptsTableMissing(error)) throw new Error(error.message);
+}
+
+export async function clearLoginFailures(email: string): Promise<void> {
+  const supabase = getSupabaseServerClient();
+  const businessId = await getBusinessId();
+  const normalized = normalizeEmail(email);
+  const { error } = await supabase
+    .from("login_attempts")
+    .delete()
+    .eq("business_id", businessId)
+    .eq("email", normalized);
+  if (error && !isLoginAttemptsTableMissing(error)) throw new Error(error.message);
+}
