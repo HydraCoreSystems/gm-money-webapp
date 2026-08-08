@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseServerClient, getBusinessId } from "@/lib/supabase";
 import { processDueScheduledTransactions } from "@/lib/scheduled";
+import { constantTimeSecretEquals } from "@/lib/constant-time";
 
 const SHARED_SECRET = process.env.CRON_SECRET;
 
@@ -12,7 +13,7 @@ export async function GET(request: NextRequest) {
   const auth = request.headers.get("authorization") || "";
   const bearer = auth.toLowerCase().startsWith("bearer ") ? auth.slice(7) : "";
   const provided = request.headers.get("x-shared-secret") || request.nextUrl.searchParams.get("secret") || bearer || "";
-  if (!SHARED_SECRET || provided !== SHARED_SECRET) {
+  if (!SHARED_SECRET || !(await constantTimeSecretEquals(provided, SHARED_SECRET))) {
     return unauthorized();
   }
 

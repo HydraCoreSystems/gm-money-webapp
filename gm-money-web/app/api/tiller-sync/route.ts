@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { getSupabaseServerClient, getBusinessId } from "@/lib/supabase";
 import { CUTOFF_DATE } from "@/lib/constants";
+import { constantTimeSecretEquals } from "@/lib/constant-time";
 
 const SHARED_SECRET = process.env.TILLER_SYNC_SECRET;
 
@@ -101,7 +102,7 @@ function shiftDateString(date: string, deltaDays: number): string {
 
 export async function POST(request: NextRequest) {
   const provided = request.headers.get("x-shared-secret") || request.nextUrl.searchParams.get("secret") || "";
-  if (!SHARED_SECRET || provided !== SHARED_SECRET) {
+  if (!SHARED_SECRET || !(await constantTimeSecretEquals(provided, SHARED_SECRET))) {
     return unauthorized();
   }
 
