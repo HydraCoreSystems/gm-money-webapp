@@ -81,6 +81,23 @@ function buildSourceRecordId(input: { date: string; description: string; amount:
   return `${input.date}|${normalizedDescription}|${input.amount.toFixed(2)}|${normalizedAccount}`;
 }
 
+// Tiller has no stable per-transaction id to key off of, and its own
+// reported date for a given purchase commonly shifts by a day or two
+// between syncs (pending -> posted). Because that date is baked into
+// source_record_id above, an exact-key upsert alone treats the shifted
+// row as brand new instead of the same real-world transaction -- this is
+// exactly the "same Afterpay charge showing twice with different
+// categories" duplicate bug. Widen the match to account+description+
+// amount within a short window so a date shift updates the existing row
+// instead of inserting a second one.
+const DUPLICATE_MATCH_WINDOW_DAYS = 5;
+
+function shiftDateString(date: string, deltaDays: number): string {
+  const d = new Date(`${date}T00:00:00Z`);
+  d.setUTCDate(d.getUTCDate() + deltaDays);
+  return d.toISOString().slice(0, 10);
+}
+
 export async function POST(request: NextRequest) {
   const provided = request.headers.get("x-shared-secret") || request.nextUrl.searchParams.get("secret") || "";
   if (!SHARED_SECRET || provided !== SHARED_SECRET) {
@@ -164,12 +181,6 @@ export async function POST(request: NextRequest) {
       const source = tx.source || "tiller";
       const sourceRecordId = buildSourceRecordId({ date, description, amount, account: accountNameForTx });
 
-      // Upsert on (business_id, source, source_record_id): the whole
-      // point of a recurring sync is calling this endpoint repeatedly, and
-      // Tiller has no concept of "only send new rows" -- without this,
-      // every run would re-insert every transaction it's ever seen,
-      // exactly the kind of duplicate-inflated-balance problem a manual
-      // Register delete was just added to clean up.
       // Bank-fed rows are, by definition, already cleared -- Tiller only
       // reports transactions the bank has actually posted, never pending
       // authorizations. The old app hardcoded this the same way
@@ -177,22 +188,57 @@ export async function POST(request: NextRequest) {
       // for bank entries; only manual entries carry a real
       // Uncleared/Cleared distinction, resolved by matching them to their
       // bank counterpart -- see app/register/actions.ts's matchToBank).
-      const { error: txError } = await supabase.from("transactions").upsert(
-        {
-          business_id: businessId,
-          account_id: accountId,
-          description,
-          amount,
-          transaction_date: date,
-          status: "cleared",
-          source,
-          source_record_id: sourceRecordId,
-          currency: "USD",
-          updated_at: new Date().toISOString(),
-        },
-        { onConflict: "business_id,source,source_record_id" },
-      );
-      if (txError) throw txError;
+      const rowPayload = {
+        business_id: businessId,
+        account_id: accountId,
+        description,
+        amount,
+        transaction_date: date,
+        status: "cleared",
+        source,
+        source_record_id: sourceRecordId,
+        currency: "USD",
+        updated_at: new Date().toISOString(),
+      };
+
+      // Look for an already-synced row for this same real-world
+      // transaction whose date has since shifted (see
+      // DUPLICATE_MATCH_WINDOW_DAYS above) before falling back to the
+      // exact-key upsert. Matching by account_id (not just account name)
+      // so this stays scoped correctly even when accountId couldn't be
+      // resolved (accountId is null in that case and the query below
+      // simply finds nothing, same as before).
+      let existingId: string | null = null;
+      if (accountId) {
+        const { data: nearby, error: nearbyError } = await supabase
+          .from("transactions")
+          .select("id, description")
+          .eq("business_id", businessId)
+          .eq("account_id", accountId)
+          .eq("source", source)
+          .eq("amount", amount)
+          .gte("transaction_date", shiftDateString(date, -DUPLICATE_MATCH_WINDOW_DAYS))
+          .lte("transaction_date", shiftDateString(date, DUPLICATE_MATCH_WINDOW_DAYS));
+        if (nearbyError) throw nearbyError;
+        const match = (nearby ?? []).find(
+          (row: { id: string; description: string }) =>
+            row.description.trim().toLowerCase() === description.trim().toLowerCase(),
+        );
+        if (match) existingId = match.id;
+      }
+
+      if (existingId) {
+        const { error: updateError } = await supabase.from("transactions").update(rowPayload).eq("id", existingId);
+        if (updateError) throw updateError;
+      } else {
+        // Upsert on (business_id, source, source_record_id) as a fallback
+        // for the exact-date-match case -- still needed so a sync re-run
+        // with an unchanged date doesn't insert a fresh duplicate either.
+        const { error: txError } = await supabase
+          .from("transactions")
+          .upsert(rowPayload, { onConflict: "business_id,source,source_record_id" });
+        if (txError) throw txError;
+      }
       accepted += 1;
     }
 
