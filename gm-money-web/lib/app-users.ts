@@ -76,22 +76,49 @@ export async function createAppUser(input: {
 
   // /setup gates on getAppUserCount() === 0 before calling this, but that
   // check and this insert are separate queries -- two overlapping /setup
-  // submissions could both pass the count check (audit finding L3). A
-  // partial unique index on app_users (business_id) where role='owner' is
-  // the real backstop; this pre-check just turns the DB violation into a
-  // clear error message instead of the generic "email already exists"
-  // guess (the index error carries no email, so the generic catch below
-  // would be misleading here).
+  // submissions could both pass the count check (audit finding L3). The
+  // owner case goes through the create_owner_user RPC (see the
+  // 20260808110000_owner_guard.sql migration), which does the whole
+  // "does an owner already exist?" check PLUS the insert in ONE database
+  // transaction behind pg_advisory_xact_lock -- the DB itself serializes
+  // the simultaneous /setup attempts and the second one to run fails to
+  // insert. That guard is deliberately scoped to the first-owner window:
+  // the production business legitimately has more than one owner row, and
+  // an "at most one owner" unique index (the earlier L3 draft) was the
+  // wrong fit -- this RPC never constrains anything once an owner exists.
   if (input.role === "owner") {
-    const { count: existingOwnerCount, error: ownerCheckError } = await supabase
-      .from("app_users")
-      .select("id", { count: "exact", head: true })
-      .eq("business_id", businessId)
-      .eq("role", "owner")
-      .eq("is_active", true);
-    if (ownerCheckError) throw new Error(ownerCheckError.message);
-    if ((existingOwnerCount ?? 0) > 0) {
-      throw new Error("An owner already exists for this business.");
+    const { data: owner, error: ownerError } = await supabase
+      .rpc("create_owner_user", {
+        p_business_id: businessId,
+        p_email: email,
+        p_display_name: displayName,
+        p_password_hash: passwordHash,
+      })
+      .select("id, email, display_name, role")
+      .maybeSingle<{
+        id: string;
+        email: string;
+        display_name: string | null;
+        role: "owner" | "admin" | "member";
+      }>();
+    // If the migration hasn't been applied to this database yet the RPC
+    // doesn't exist -- degrade to the old count+insert behavior rather
+    // than breaking first-ever /setup entirely. Same fail-open pattern as
+    // the login rate-limit helpers (getLoginAttemptState et al).
+    if (ownerError && !isOwnerRpcMissing(ownerError)) {
+      const text = String(ownerError.message ?? "").toLowerCase();
+      if (text.includes("gm_owner_exists")) {
+        throw new Error("An owner already exists for this business.");
+      }
+      throw new Error(ownerError.message);
+    }
+    if (owner && !ownerError) {
+      return {
+        id: String(owner.id),
+        email: String(owner.email),
+        displayName: String(owner.display_name ?? ""),
+        role: "owner",
+      };
     }
   }
 
@@ -123,6 +150,11 @@ export async function createAppUser(input: {
     displayName: String(data.display_name ?? ""),
     role: normalizeRole(data.role),
   };
+}
+
+function isOwnerRpcMissing(error: { code?: string; message?: string }): boolean {
+  const text = `${error.code ?? ""} ${error.message ?? ""}`.toLowerCase();
+  return text.includes("create_owner_user") && (text.includes("does not exist") || text.includes("42p01") || text.includes("relation") || text.includes("function") || text.includes("pgrst"));
 }
 
 export async function findActiveUserByEmail(email: string): Promise<{
