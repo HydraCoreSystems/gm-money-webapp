@@ -52,6 +52,7 @@ export const api = {
     if (error) throw error;
     const formatted = (data || []).map(a => ({
       ...a,
+      institution: a.institution === 'Chase' ? 'PNC' : (a.institution || 'PNC'),
       opening_balance: safeFloat(a.opening_balance),
       current_balance: safeFloat(a.current_balance)
     }));
@@ -62,7 +63,7 @@ export const api = {
     const openBal = safeFloat(acc.opening_balance);
     const { data, error } = await supabase.from('accounts').insert([{
       name: acc.name.trim(),
-      institution: acc.institution?.trim() || null,
+      institution: acc.institution?.trim() || 'PNC',
       type: acc.type,
       opening_balance: openBal,
       current_balance: openBal,
@@ -75,7 +76,7 @@ export const api = {
   async updateAccount(id, acc) {
     const { error } = await supabase.from('accounts').update({
       name: acc.name?.trim(),
-      institution: acc.institution?.trim() || null,
+      institution: acc.institution?.trim() || 'PNC',
       type: acc.type,
       opening_balance: safeFloat(acc.opening_balance),
       notes: acc.notes?.trim() || null,
@@ -289,33 +290,11 @@ export const api = {
   },
 
   // -------------------------------------------------------------
-  // 4. SMART PNC & UNIVERSAL CSV IMPORT ENGINE
+  // 4. INTELLIGENT CELL-BY-CELL PNC PARSER
   // -------------------------------------------------------------
   async previewCSV(csvContent, accountId) {
     const allLines = parseCSV(csvContent);
-    if (allLines.length < 2) throw new Error('CSV file has no data rows');
-
-    // Find the real header row
-    let headerRowIdx = 0;
-    for (let r = 0; r < Math.min(5, allLines.length); r++) {
-      const rowLower = allLines[r].map(c => c.toLowerCase());
-      if (rowLower.some(c => c.includes('date') || c.includes('description') || c.includes('amount') || c.includes('debit') || c.includes('deposit') || c.includes('withdrawal'))) {
-        headerRowIdx = r;
-        break;
-      }
-    }
-
-    const headers = allLines[headerRowIdx].map(h => h.toLowerCase());
-    const dataRows = allLines.slice(headerRowIdx + 1);
-
-    let dateIdx = headers.findIndex(h => h.includes('date'));
-    let descIdx = headers.findIndex(h => h.includes('description') || h.includes('payee') || h.includes('memo') || h.includes('name'));
-    let amtIdx = headers.findIndex(h => h === 'amount' || h === 'transaction amount' || (h.includes('amt') && !h.includes('fee')));
-    let debitIdx = headers.findIndex(h => h.includes('debit') || h.includes('withdrawal') || h.includes('withdraw'));
-    let creditIdx = headers.findIndex(h => h.includes('credit') || h.includes('deposit'));
-
-    if (dateIdx === -1) dateIdx = 0;
-    if (descIdx === -1) descIdx = 1;
+    if (allLines.length < 1) throw new Error('CSV file is empty');
 
     const { rules } = await this.getMerchantRules();
     let existingTrans = [];
@@ -327,68 +306,84 @@ export const api = {
     const parsed = [];
     let dupCount = 0;
 
-    dataRows.forEach(row => {
-      if (!row || row.length <= 1) return;
-      const rawDate = row[dateIdx] || '';
-      const rawDesc = row[descIdx] || 'Bank Transaction';
+    allLines.forEach(row => {
+      if (!row || row.length < 2) return;
 
-      // Format Date to YYYY-MM-DD
-      let formattedDate = rawDate;
-      const dateParts = rawDate.match(/(\d{1,4})[\/\-](\d{1,2})[\/\-](\d{1,4})/);
-      if (dateParts) {
-        if (dateParts[1].length === 4) {
-          formattedDate = `${dateParts[1]}-${dateParts[2].padStart(2, '0')}-${dateParts[3].padStart(2, '0')}`;
-        } else {
-          formattedDate = `${dateParts[3].length === 2 ? '20' + dateParts[3] : dateParts[3]}-${dateParts[1].padStart(2, '0')}-${dateParts[2].padStart(2, '0')}`;
+      // 1. Find Date cell
+      let formattedDate = null;
+      let dateColIdx = -1;
+
+      for (let i = 0; i < row.length; i++) {
+        const cell = row[i];
+        const match = cell.match(/^(\d{1,4})[\/\-\.](\d{1,2})[\/\-](\d{1,4})$/);
+        if (match) {
+          dateColIdx = i;
+          if (match[1].length === 4) {
+            formattedDate = `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
+          } else {
+            formattedDate = `${match[3].length === 2 ? '20' + match[3] : match[3]}-${match[1].padStart(2, '0')}-${match[2].padStart(2, '0')}`;
+          }
+          break;
         }
       }
 
-      // Determine real Dollar Amount (Handles PNC Withdrawals / Deposits columns)
+      // If row has no date (e.g. Header line or bank summary), skip it
+      if (!formattedDate) return;
+
+      // 2. Find Payee / Description cell (longest text cell with letters)
+      let rawDesc = '';
+      let descColIdx = -1;
+
+      for (let i = 0; i < row.length; i++) {
+        if (i === dateColIdx) continue;
+        const cell = row[i];
+        if (/[a-zA-Z]/.test(cell) && cell.length > rawDesc.length) {
+          rawDesc = cell;
+          descColIdx = i;
+        }
+      }
+      if (!rawDesc) rawDesc = 'Bank Transaction';
+
+      // 3. Find Amount: Extract all numeric float cells
+      const numberCells = [];
+      for (let i = 0; i < row.length; i++) {
+        if (i === dateColIdx || i === descColIdx) continue;
+        const cleaned = row[i].replace(/[\$,]/g, '').trim();
+        if (/^[\-\+]?\d+(\.\d+)?$/.test(cleaned)) {
+          const val = parseFloat(cleaned);
+          if (!isNaN(val) && val !== 0) {
+            numberCells.push({ col: i, val });
+          }
+        }
+      }
+
       let finalAmount = 0;
       let transType = 'expense';
 
-      // Check explicit Debit/Withdrawals column first
-      if (debitIdx !== -1 && row[debitIdx] && safeFloat(row[debitIdx]) !== 0) {
-        finalAmount = -Math.abs(safeFloat(row[debitIdx]));
-        transType = 'expense';
-      }
-      // Check explicit Credit/Deposits column
-      else if (creditIdx !== -1 && row[creditIdx] && safeFloat(row[creditIdx]) !== 0) {
-        finalAmount = Math.abs(safeFloat(row[creditIdx]));
-        transType = 'income';
-      }
-      // Check unified Amount column
-      else if (amtIdx !== -1 && row[amtIdx] && safeFloat(row[amtIdx]) !== 0) {
-        const val = safeFloat(row[amtIdx]);
-        finalAmount = val;
-        transType = val >= 0 ? 'income' : 'expense';
-      }
-      // Fallback: search all columns for the first non-zero float value
-      else {
-        for (let c = 0; c < row.length; c++) {
-          const colHeader = (headers[c] || '');
-          if (c === dateIdx || c === descIdx || colHeader.includes('balance') || colHeader.includes('card') || colHeader.includes('account')) {
-            continue;
-          }
-          const val = safeFloat(row[c]);
-          if (val !== 0) {
-            const isDescIncome = /(deposit|credit|refund|payroll|square)/i.test(rawDesc);
-            if (val < 0) {
-              finalAmount = val;
-              transType = 'expense';
-            } else if (isDescIncome) {
-              finalAmount = val;
-              transType = 'income';
-            } else {
-              finalAmount = -Math.abs(val);
-              transType = 'expense';
-            }
-            break;
-          }
-        }
+      if (numberCells.length === 1) {
+        finalAmount = numberCells[0].val;
+        transType = finalAmount >= 0 ? 'income' : 'expense';
+      } else if (numberCells.length >= 2) {
+        // In bank exports (Withdrawals, Deposits, Balance), the first number is usually the transaction amount
+        const firstNum = numberCells[0].val;
+        finalAmount = firstNum;
+        transType = finalAmount >= 0 ? 'income' : 'expense';
       }
 
-      const cleanPayee = rawDesc.replace(/(#\d+|store\s*\d+|pos\s*debit|purchase\s*authorized\s*on\s*[\d\/]+|card\d+)/gi, '').trim() || rawDesc;
+      // If amount was positive, but description clearly indicates an expense (purchase, card, pos, sub, plan)
+      const descLower = rawDesc.toLowerCase();
+      const isPurchase = /(purchase|card|pos|debit|plan|sub|store|fee|payment)/i.test(descLower);
+      const isCredit = /(deposit|credit|refund|payroll|transfer from)/i.test(descLower);
+
+      if (isPurchase && !isCredit && finalAmount > 0) {
+        finalAmount = -finalAmount;
+        transType = 'expense';
+      } else if (isCredit && finalAmount < 0) {
+        finalAmount = Math.abs(finalAmount);
+        transType = 'income';
+      }
+
+      const cleanPayee = rawDesc.replace(/(#\d+|store\s*\d+|pos\s*debit|purchase\s*authorized\s*on\s*[\d\/]+|card\d+|xxxxxxxxxxxx\d+)/gi, '').trim() || rawDesc;
       const upper = cleanPayee.toUpperCase();
       const match = (rules || []).find(r => upper.includes((r.match_pattern || '').toUpperCase()));
 
@@ -422,8 +417,8 @@ export const api = {
         total_rows: parsed.length,
         new_count: parsed.length - dupCount,
         duplicate_count: dupCount,
-        profile: { name: 'PNC / Bank CSV', institution: 'PNC Bank' },
-        profile_name: 'PNC / Bank CSV',
+        profile: { name: 'PNC Bank CSV', institution: 'PNC Bank' },
+        profile_name: 'PNC Bank CSV',
         transactions: parsed
       }
     };
