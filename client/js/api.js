@@ -299,7 +299,6 @@ export const api = {
     const headers = lines[0].map(h => h.toLowerCase());
     const dataRows = lines.slice(1);
 
-    // Auto-detect columns
     let dateIdx = headers.findIndex(h => h.includes('date'));
     let descIdx = headers.findIndex(h => h.includes('description') || h.includes('payee') || h.includes('name') || h.includes('memo'));
     let amtIdx = headers.findIndex(h => h === 'amount' || h.includes('amt') || h.includes('transaction amount'));
@@ -321,7 +320,6 @@ export const api = {
       const rawDate = row[dateIdx] || '';
       const rawDesc = row[descIdx] || 'Bank Transaction';
 
-      // Parse date to YYYY-MM-DD
       let formattedDate = rawDate;
       const dateParts = rawDate.match(/(\d{1,4})[\/\-](\d{1,2})[\/\-](\d{1,4})/);
       if (dateParts) {
@@ -332,7 +330,6 @@ export const api = {
         }
       }
 
-      // Parse amount
       let finalAmount = 0;
       let transType = 'expense';
 
@@ -353,14 +350,10 @@ export const api = {
         }
       }
 
-      // Clean Payee
       const cleanPayee = rawDesc.replace(/(#\d+|store\s*\d+|pos\s*debit|purchase\s*authorized\s*on\s*[\d\/]+)/gi, '').trim() || rawDesc;
-
-      // Merchant Memory Match
       const upper = cleanPayee.toUpperCase();
-      const match = (rules || []).find(r => upper.includes(r.match_pattern.toUpperCase()));
+      const match = (rules || []).find(r => upper.includes((r.match_pattern || '').toUpperCase()));
 
-      // Duplicate Check
       const isDuplicate = (existingTrans || []).some(e =>
         e.date === formattedDate &&
         Math.abs(parseFloat(e.amount)) === Math.abs(finalAmount) &&
@@ -376,9 +369,9 @@ export const api = {
         amount: finalAmount,
         transaction_type: transType,
         category_id: match ? match.category_id : null,
-        category_name: match ? match.categories?.name : null,
+        category_name: (match && match.categories) ? match.categories.name : null,
         subcategory_id: match ? match.subcategory_id : null,
-        subcategory_name: match ? match.subcategories?.name : null,
+        subcategory_name: (match && match.subcategories) ? match.subcategories.name : null,
         confidence: match ? (match.confidence || 1.0) : 0,
         is_duplicate: isDuplicate,
         duplicate_reason: isDuplicate ? 'Matches existing date & amount in account' : null
@@ -391,6 +384,10 @@ export const api = {
         total_rows: parsed.length,
         new_count: parsed.length - dupCount,
         duplicate_count: dupCount,
+        profile: {
+          name: 'Universal Bank CSV',
+          institution: 'PNC / Bank'
+        },
         profile_name: 'PNC / Bank CSV',
         transactions: parsed
       }
@@ -431,9 +428,7 @@ export const api = {
   async getImportHistory() { return { success: true, history: [] }; },
 
   // 5. Attachments
-  async uploadAttachment(transId, { original_name, mime_type, base64_data }) {
-    return { success: true };
-  },
+  async uploadAttachment(transId, { original_name, mime_type, base64_data }) { return { success: true }; },
   async deleteAttachment(id) { return { success: true }; },
 
   // 6. Merchant Memory
@@ -464,7 +459,7 @@ export const api = {
   async testMerchantPattern(description) {
     const { data: rules } = await supabase.from('merchant_memory').select('*, categories(name), subcategories(name)');
     const upper = (description || '').toUpperCase();
-    const match = (rules || []).find(r => upper.includes(r.match_pattern.toUpperCase()));
+    const match = (rules || []).find(r => upper.includes((r.match_pattern || '').toUpperCase()));
     return {
       success: true,
       match: match ? {
