@@ -1,0 +1,16 @@
+{
+  "name": "gathering-moss-financial-center",
+  "version": "1.0.0",
+  "description": "Standalone financial management application for Gathering Moss LLC modernizing Microsoft Money",
+  "main": "server/index.js",
+  "type": "module",
+  "scripts": {
+    "start": "node server/index.js",
+    "dev": "node server/index.js",
+    "test": "node tests/test_all.js"
+  },
+  "dependencies": {
+    "express": "^4.21.2",
+    "cors": "^2.8.5"
+  }
+}
