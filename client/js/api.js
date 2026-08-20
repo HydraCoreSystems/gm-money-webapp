@@ -7,7 +7,8 @@ export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
 function safeFloat(val, fallback = 0) {
   if (val === null || val === undefined || val === '') return fallback;
-  const n = parseFloat(String(val).replace(/[\$,]/g, '').trim());
+  const cleaned = String(val).replace(/[\$,]/g, '').trim();
+  const n = parseFloat(cleaned);
   return isNaN(n) ? fallback : n;
 }
 
@@ -45,9 +46,7 @@ function parseCSV(text) {
 }
 
 export const api = {
-  // -------------------------------------------------------------
-  // 1. ACCOUNTS
-  // -------------------------------------------------------------
+  // 1. Accounts
   async getAccounts() {
     const { data, error } = await supabase.from('accounts').select('*').order('type').order('name');
     if (error) throw error;
@@ -94,9 +93,7 @@ export const api = {
     return { success: true };
   },
 
-  // -------------------------------------------------------------
-  // 2. CATEGORIES & SUBCATEGORIES
-  // -------------------------------------------------------------
+  // 2. Categories & Subcategories
   async getCategories() {
     const { data: categories, error: catErr } = await supabase.from('categories').select('*').order('sort_order').order('name');
     if (catErr) throw catErr;
@@ -149,9 +146,7 @@ export const api = {
     return { success: true };
   },
 
-  // -------------------------------------------------------------
-  // 3. TRANSACTIONS & REGISTER
-  // -------------------------------------------------------------
+  // 3. Transactions & Register
   async getTransactions(params = {}) {
     const [accRes, catRes, transRes] = await Promise.all([
       this.getAccounts(),
@@ -294,27 +289,54 @@ export const api = {
   },
 
   // -------------------------------------------------------------
-  // 4. UNIVERSAL BANK CSV IMPORT (PNC, Chase, Amex, Discover, etc.)
+  // 4. INTELLIGENT PNC & UNIVERSAL BANK CSV PARSER
   // -------------------------------------------------------------
   async previewCSV(csvContent, accountId) {
-    const lines = parseCSV(csvContent);
-    if (lines.length < 2) throw new Error('CSV file has no data rows');
+    const allLines = parseCSV(csvContent);
+    if (allLines.length < 2) throw new Error('CSV file has no data rows');
 
-    const headers = lines[0].map(h => h.toLowerCase());
-    const dataRows = lines.slice(1);
+    // Find the real header row by inspecting first 5 rows
+    let headerRowIdx = 0;
+    for (let r = 0; r < Math.min(5, allLines.length); r++) {
+      const rowLower = allLines[r].map(c => c.toLowerCase());
+      if (rowLower.some(c => c.includes('date') || c.includes('description') || c.includes('amount') || c.includes('debit') || c.includes('deposit') || c.includes('withdrawal'))) {
+        headerRowIdx = r;
+        break;
+      }
+    }
+
+    const headers = allLines[headerRowIdx].map(h => h.toLowerCase());
+    const dataRows = allLines.slice(headerRowIdx + 1);
 
     let dateIdx = headers.findIndex(h => h.includes('date'));
-    let descIdx = headers.findIndex(h => h.includes('description') || h.includes('payee') || h.includes('name') || h.includes('memo'));
-    let amtIdx = headers.findIndex(h => h === 'amount' || h.includes('amt') || h.includes('transaction amount'));
-    let debitIdx = headers.findIndex(h => h.includes('debit') || h.includes('withdrawal'));
+    let descIdx = headers.findIndex(h => h.includes('description') || h.includes('payee') || h.includes('memo') || h.includes('name'));
+    let amtIdx = headers.findIndex(h => h === 'amount' || h === 'transaction amount' || h.includes('amt'));
+    let debitIdx = headers.findIndex(h => h.includes('debit') || h.includes('withdrawal') || h.includes('withdraw'));
     let creditIdx = headers.findIndex(h => h.includes('credit') || h.includes('deposit'));
+
+    // Fallback: If amount wasn't named in header, scan first data row for columns that contain valid dollar amounts ($12.34 or -45.00)
+    if (amtIdx === -1 && debitIdx === -1 && creditIdx === -1) {
+      if (dataRows.length > 0) {
+        for (let col = 0; col < dataRows[0].length; col++) {
+          const val = dataRows[0][col];
+          if (/^[\-\+]?\$?\d+[\d,]*\.\d{2}$/.test(val.trim())) {
+            amtIdx = col;
+            break;
+          }
+        }
+      }
+    }
 
     if (dateIdx === -1) dateIdx = 0;
     if (descIdx === -1) descIdx = 1;
-    if (amtIdx === -1 && debitIdx === -1 && creditIdx === -1) amtIdx = 2;
+    if (amtIdx === -1 && debitIdx === -1 && creditIdx === -1) amtIdx = Math.min(2, headers.length - 1);
 
     const { rules } = await this.getMerchantRules();
-    const { data: existingTrans } = await supabase.from('transactions').select('date, amount, payee, original_description').eq('account_id', accountId);
+    let existingTrans = [];
+    if (accountId) {
+      const { data } = await supabase.from('transactions').select('date, amount, payee, original_description').eq('account_id', accountId);
+      existingTrans = data || [];
+    }
 
     const parsed = [];
     let dupCount = 0;
@@ -324,6 +346,7 @@ export const api = {
       const rawDate = row[dateIdx] || '';
       const rawDesc = row[descIdx] || 'Bank Transaction';
 
+      // Format Date to YYYY-MM-DD
       let formattedDate = rawDate;
       const dateParts = rawDate.match(/(\d{1,4})[\/\-](\d{1,2})[\/\-](\d{1,4})/);
       if (dateParts) {
@@ -334,10 +357,11 @@ export const api = {
         }
       }
 
+      // Determine real Dollar Amount
       let finalAmount = 0;
       let transType = 'expense';
 
-      if (amtIdx !== -1 && row[amtIdx]) {
+      if (amtIdx !== -1 && row[amtIdx] !== undefined) {
         const num = safeFloat(row[amtIdx]);
         finalAmount = num;
         transType = num >= 0 ? 'income' : 'expense';
@@ -353,11 +377,25 @@ export const api = {
         }
       }
 
-      const cleanPayee = rawDesc.replace(/(#\d+|store\s*\d+|pos\s*debit|purchase\s*authorized\s*on\s*[\d\/]+)/gi, '').trim() || rawDesc;
+      // If amount still parsed to 0, check all columns for any column with a float value
+      if (finalAmount === 0) {
+        for (let c = 0; c < row.length; c++) {
+          if (c !== dateIdx && c !== descIdx) {
+            const possibleNum = safeFloat(row[c]);
+            if (possibleNum !== 0 && !isNaN(possibleNum)) {
+              finalAmount = possibleNum;
+              transType = possibleNum >= 0 ? 'income' : 'expense';
+              break;
+            }
+          }
+        }
+      }
+
+      const cleanPayee = rawDesc.replace(/(#\d+|store\s*\d+|pos\s*debit|purchase\s*authorized\s*on\s*[\d\/]+|card\d+)/gi, '').trim() || rawDesc;
       const upper = cleanPayee.toUpperCase();
       const match = (rules || []).find(r => upper.includes((r.match_pattern || '').toUpperCase()));
 
-      const isDuplicate = (existingTrans || []).some(e =>
+      const isDuplicate = existingTrans.some(e =>
         e.date === formattedDate &&
         Math.abs(safeFloat(e.amount)) === Math.abs(finalAmount) &&
         (String(e.original_description || '').toLowerCase() === rawDesc.toLowerCase() || String(e.payee || '').toLowerCase() === cleanPayee.toLowerCase())
@@ -372,9 +410,9 @@ export const api = {
         amount: finalAmount,
         transaction_type: transType,
         category_id: match ? match.category_id : null,
-        category_name: (match && match.categories) ? match.categories.name : null,
+        category_name: null,
         subcategory_id: match ? match.subcategory_id : null,
-        subcategory_name: (match && match.subcategories) ? match.subcategories.name : null,
+        subcategory_name: null,
         confidence: match ? (safeFloat(match.confidence) || 1.0) : 0,
         is_duplicate: isDuplicate,
         duplicate_reason: isDuplicate ? 'Matches existing date & amount in account' : null
@@ -387,7 +425,7 @@ export const api = {
         total_rows: parsed.length,
         new_count: parsed.length - dupCount,
         duplicate_count: dupCount,
-        profile: { name: 'Universal Bank CSV', institution: 'PNC / Bank' },
+        profile: { name: 'PNC / Bank CSV', institution: 'PNC Bank' },
         profile_name: 'PNC / Bank CSV',
         transactions: parsed
       }
@@ -395,7 +433,13 @@ export const api = {
   },
 
   async processImport({ accountId, transactions }) {
-    const accId = parseInt(accountId, 10);
+    let accId = parseInt(accountId, 10);
+    if (isNaN(accId)) {
+      const { data: accs } = await supabase.from('accounts').select('id').limit(1);
+      if (accs && accs[0]) accId = accs[0].id;
+      else throw new Error('Please create at least one account under Accounts before importing');
+    }
+
     const nonDups = (transactions || []).filter(t => !t.is_duplicate);
 
     if (nonDups.length === 0) {
@@ -404,9 +448,9 @@ export const api = {
 
     const rows = nonDups.map(t => ({
       account_id: accId,
-      date: t.date,
-      payee: t.payee,
-      original_description: t.original_description,
+      date: t.date || new Date().toISOString().slice(0, 10),
+      payee: t.payee || 'Bank Transaction',
+      original_description: t.original_description || t.payee,
       amount: safeFloat(t.amount),
       transaction_type: t.transaction_type || (safeFloat(t.amount) >= 0 ? 'income' : 'expense'),
       category_id: t.category_id ? parseInt(t.category_id, 10) : null,
@@ -430,15 +474,11 @@ export const api = {
   async getImportProfiles() { return { success: true, profiles: [] }; },
   async getImportHistory() { return { success: true, history: [] }; },
 
-  // -------------------------------------------------------------
-  // 5. ATTACHMENTS
-  // -------------------------------------------------------------
+  // 5. Attachments
   async uploadAttachment() { return { success: true }; },
   async deleteAttachment() { return { success: true }; },
 
-  // -------------------------------------------------------------
-  // 6. MERCHANT MEMORY
-  // -------------------------------------------------------------
+  // 6. Merchant Memory
   async getMerchantRules() {
     const { data, error } = await supabase.from('merchant_memory').select('*').order('times_seen', { ascending: false });
     if (error) throw error;
@@ -479,9 +519,7 @@ export const api = {
     };
   },
 
-  // -------------------------------------------------------------
-  // 7. SCHEDULED BILLS & CASH FORECASTING
-  // -------------------------------------------------------------
+  // 7. Scheduled Bills & Projections
   async getScheduled() {
     const [accRes, catRes, schRes] = await Promise.all([
       this.getAccounts(),
@@ -603,9 +641,7 @@ export const api = {
     };
   },
 
-  // -------------------------------------------------------------
-  // 8. REPORTS & DASHBOARD SUMMARY (100% Guaranteed Safe Defaults)
-  // -------------------------------------------------------------
+  // 8. Reports & Dashboard
   async getDashboardSummary() {
     const [accRes, catRes, transRes] = await Promise.all([
       this.getAccounts(),
@@ -740,9 +776,7 @@ export const api = {
     return { success: true, payees };
   },
 
-  // -------------------------------------------------------------
-  // 9. RECONCILIATION
-  // -------------------------------------------------------------
+  // 9. Reconciliation
   async startReconciliation({ account_id, statement_date, statement_balance }) {
     const { data: acc } = await supabase.from('accounts').select('*').eq('id', account_id).single();
     const { data: trans } = await supabase.from('transactions').select('*').eq('account_id', account_id).lte('date', statement_date);
@@ -782,9 +816,7 @@ export const api = {
     return { success: true };
   },
 
-  // -------------------------------------------------------------
-  // 10. BALANCE ENGINE & DATA RESET
-  // -------------------------------------------------------------
+  // 10. Balance Engine & Data Reset
   async recalculateBalance(accountId) {
     const { data: acc } = await supabase.from('accounts').select('opening_balance').eq('id', accountId).single();
     if (!acc) return;
