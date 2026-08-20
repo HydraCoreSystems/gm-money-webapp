@@ -289,13 +289,13 @@ export const api = {
   },
 
   // -------------------------------------------------------------
-  // 4. INTELLIGENT PNC & UNIVERSAL BANK CSV PARSER
+  // 4. SMART PNC & UNIVERSAL CSV IMPORT ENGINE
   // -------------------------------------------------------------
   async previewCSV(csvContent, accountId) {
     const allLines = parseCSV(csvContent);
     if (allLines.length < 2) throw new Error('CSV file has no data rows');
 
-    // Find the real header row by inspecting first 5 rows
+    // Find the real header row
     let headerRowIdx = 0;
     for (let r = 0; r < Math.min(5, allLines.length); r++) {
       const rowLower = allLines[r].map(c => c.toLowerCase());
@@ -310,26 +310,12 @@ export const api = {
 
     let dateIdx = headers.findIndex(h => h.includes('date'));
     let descIdx = headers.findIndex(h => h.includes('description') || h.includes('payee') || h.includes('memo') || h.includes('name'));
-    let amtIdx = headers.findIndex(h => h === 'amount' || h === 'transaction amount' || h.includes('amt'));
+    let amtIdx = headers.findIndex(h => h === 'amount' || h === 'transaction amount' || (h.includes('amt') && !h.includes('fee')));
     let debitIdx = headers.findIndex(h => h.includes('debit') || h.includes('withdrawal') || h.includes('withdraw'));
     let creditIdx = headers.findIndex(h => h.includes('credit') || h.includes('deposit'));
 
-    // Fallback: If amount wasn't named in header, scan first data row for columns that contain valid dollar amounts ($12.34 or -45.00)
-    if (amtIdx === -1 && debitIdx === -1 && creditIdx === -1) {
-      if (dataRows.length > 0) {
-        for (let col = 0; col < dataRows[0].length; col++) {
-          const val = dataRows[0][col];
-          if (/^[\-\+]?\$?\d+[\d,]*\.\d{2}$/.test(val.trim())) {
-            amtIdx = col;
-            break;
-          }
-        }
-      }
-    }
-
     if (dateIdx === -1) dateIdx = 0;
     if (descIdx === -1) descIdx = 1;
-    if (amtIdx === -1 && debitIdx === -1 && creditIdx === -1) amtIdx = Math.min(2, headers.length - 1);
 
     const { rules } = await this.getMerchantRules();
     let existingTrans = [];
@@ -357,36 +343,47 @@ export const api = {
         }
       }
 
-      // Determine real Dollar Amount
+      // Determine real Dollar Amount (Handles PNC Withdrawals / Deposits columns)
       let finalAmount = 0;
       let transType = 'expense';
 
-      if (amtIdx !== -1 && row[amtIdx] !== undefined) {
-        const num = safeFloat(row[amtIdx]);
-        finalAmount = num;
-        transType = num >= 0 ? 'income' : 'expense';
-      } else {
-        const debitVal = debitIdx !== -1 && row[debitIdx] ? safeFloat(row[debitIdx]) : 0;
-        const creditVal = creditIdx !== -1 && row[creditIdx] ? safeFloat(row[creditIdx]) : 0;
-        if (creditVal > 0) {
-          finalAmount = creditVal;
-          transType = 'income';
-        } else {
-          finalAmount = -Math.abs(debitVal);
-          transType = 'expense';
-        }
+      // Check explicit Debit/Withdrawals column first
+      if (debitIdx !== -1 && row[debitIdx] && safeFloat(row[debitIdx]) !== 0) {
+        finalAmount = -Math.abs(safeFloat(row[debitIdx]));
+        transType = 'expense';
       }
-
-      // If amount still parsed to 0, check all columns for any column with a float value
-      if (finalAmount === 0) {
+      // Check explicit Credit/Deposits column
+      else if (creditIdx !== -1 && row[creditIdx] && safeFloat(row[creditIdx]) !== 0) {
+        finalAmount = Math.abs(safeFloat(row[creditIdx]));
+        transType = 'income';
+      }
+      // Check unified Amount column
+      else if (amtIdx !== -1 && row[amtIdx] && safeFloat(row[amtIdx]) !== 0) {
+        const val = safeFloat(row[amtIdx]);
+        finalAmount = val;
+        transType = val >= 0 ? 'income' : 'expense';
+      }
+      // Fallback: search all columns for the first non-zero float value
+      else {
         for (let c = 0; c < row.length; c++) {
-          if (c !== dateIdx && c !== descIdx) {
-            const possibleNum = safeFloat(row[c]);
-            if (possibleNum !== 0 && !isNaN(possibleNum)) {
-              finalAmount = possibleNum;
-              transType = possibleNum >= 0 ? 'income' : 'expense';
-              break;
+          const colHeader = (headers[c] || '');
+          if (c === dateIdx || c === descIdx || colHeader.includes('balance') || colHeader.includes('card') || colHeader.includes('account')) {
+            continue;
+          }
+          const val = safeFloat(row[c]);
+          if (val !== 0) {
+            const isDescIncome = /(deposit|credit|refund|payroll|square)/i.test(rawDesc);
+            if (val < 0) {
+              finalAmount = val;
+              transType = 'expense';
+            } else if (isDescIncome) {
+              finalAmount = val;
+              transType = 'income';
+            } else {
+              finalAmount = -Math.abs(val);
+              transType = 'expense';
             }
+            break;
           }
         }
       }
