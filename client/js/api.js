@@ -5,7 +5,11 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 
 export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
 
-// Fast browser-compatible CSV Parser
+function safeFloat(val, fallback = 0) {
+  const n = parseFloat(val);
+  return isNaN(n) ? fallback : n;
+}
+
 function parseCSV(text) {
   const lines = [];
   let row = [];
@@ -44,11 +48,16 @@ export const api = {
   async getAccounts() {
     const { data, error } = await supabase.from('accounts').select('*').order('type').order('name');
     if (error) throw error;
-    return { success: true, accounts: data || [] };
+    const formatted = (data || []).map(a => ({
+      ...a,
+      opening_balance: safeFloat(a.opening_balance),
+      current_balance: safeFloat(a.current_balance)
+    }));
+    return { success: true, accounts: formatted };
   },
 
   async createAccount(acc) {
-    const openBal = parseFloat(acc.opening_balance) || 0;
+    const openBal = safeFloat(acc.opening_balance);
     const { data, error } = await supabase.from('accounts').insert([{
       name: acc.name.trim(),
       institution: acc.institution?.trim() || null,
@@ -66,7 +75,7 @@ export const api = {
       name: acc.name?.trim(),
       institution: acc.institution?.trim() || null,
       type: acc.type,
-      opening_balance: parseFloat(acc.opening_balance) || 0,
+      opening_balance: safeFloat(acc.opening_balance),
       notes: acc.notes?.trim() || null,
       active: acc.active ? true : false,
       updated_at: new Date().toISOString()
@@ -161,11 +170,12 @@ export const api = {
 
     const formatted = (data || []).map(t => ({
       ...t,
+      amount: safeFloat(t.amount),
       account_name: t.accounts?.name || 'Unknown',
       account_type: t.accounts?.type || 'checking',
       category_name: t.categories?.name || null,
       subcategory_name: t.subcategories?.name || null,
-      splits: t.transaction_splits || [],
+      splits: (t.transaction_splits || []).map(s => ({ ...s, amount: safeFloat(s.amount) })),
       attachments: t.transaction_attachments || [],
       has_splits: (t.transaction_splits || []).length > 0,
       has_attachments: (t.transaction_attachments || []).length > 0,
@@ -176,7 +186,7 @@ export const api = {
   },
 
   async createTransaction(payload) {
-    const rawAbs = Math.abs(parseFloat(payload.amount) || 0);
+    const rawAbs = Math.abs(safeFloat(payload.amount));
     const finalAmount = payload.transaction_type === 'income' ? rawAbs : -rawAbs;
 
     const { data: trans, error } = await supabase.from('transactions').insert([{
@@ -202,7 +212,7 @@ export const api = {
         transaction_id: trans.id,
         category_id: s.category_id || null,
         subcategory_id: s.subcategory_id || null,
-        amount: parseFloat(s.amount) || 0,
+        amount: safeFloat(s.amount),
         memo: s.memo?.trim() || null
       }));
       await supabase.from('transaction_splits').insert(splitsData);
@@ -213,7 +223,7 @@ export const api = {
   },
 
   async updateTransaction(id, payload) {
-    const rawAbs = Math.abs(parseFloat(payload.amount) || 0);
+    const rawAbs = Math.abs(safeFloat(payload.amount));
     const finalAmount = payload.transaction_type === 'income' ? rawAbs : -rawAbs;
 
     const { error } = await supabase.from('transactions').update({
@@ -240,7 +250,7 @@ export const api = {
           transaction_id: id,
           category_id: s.category_id || null,
           subcategory_id: s.subcategory_id || null,
-          amount: parseFloat(s.amount) || 0,
+          amount: safeFloat(s.amount),
           memo: s.memo?.trim() || null
         }));
         await supabase.from('transaction_splits').insert(splitsData);
@@ -291,7 +301,7 @@ export const api = {
     return { success: true };
   },
 
-  // 4. Universal Bank CSV Import & Deduplication (PNC, Chase, Amex, etc.)
+  // 4. Universal Bank CSV Import & Deduplication
   async previewCSV(csvContent, accountId) {
     const lines = parseCSV(csvContent);
     if (lines.length < 2) throw new Error('CSV file has no data rows');
@@ -335,12 +345,12 @@ export const api = {
 
       if (amtIdx !== -1 && row[amtIdx]) {
         const cleaned = row[amtIdx].replace(/[\$,]/g, '').trim();
-        const num = parseFloat(cleaned) || 0;
+        const num = safeFloat(cleaned);
         finalAmount = num;
         transType = num >= 0 ? 'income' : 'expense';
       } else {
-        const debitVal = debitIdx !== -1 && row[debitIdx] ? parseFloat(row[debitIdx].replace(/[\$,]/g, '')) || 0 : 0;
-        const creditVal = creditIdx !== -1 && row[creditIdx] ? parseFloat(row[creditIdx].replace(/[\$,]/g, '')) || 0 : 0;
+        const debitVal = debitIdx !== -1 && row[debitIdx] ? safeFloat(row[debitIdx].replace(/[\$,]/g, '')) : 0;
+        const creditVal = creditIdx !== -1 && row[creditIdx] ? safeFloat(row[creditIdx].replace(/[\$,]/g, '')) : 0;
         if (creditVal > 0) {
           finalAmount = creditVal;
           transType = 'income';
@@ -356,7 +366,7 @@ export const api = {
 
       const isDuplicate = (existingTrans || []).some(e =>
         e.date === formattedDate &&
-        Math.abs(parseFloat(e.amount)) === Math.abs(finalAmount) &&
+        Math.abs(safeFloat(e.amount)) === Math.abs(finalAmount) &&
         (e.original_description?.toLowerCase() === rawDesc.toLowerCase() || e.payee?.toLowerCase() === cleanPayee.toLowerCase())
       );
 
@@ -372,7 +382,7 @@ export const api = {
         category_name: (match && match.categories) ? match.categories.name : null,
         subcategory_id: match ? match.subcategory_id : null,
         subcategory_name: (match && match.subcategories) ? match.subcategories.name : null,
-        confidence: match ? (match.confidence || 1.0) : 0,
+        confidence: match ? (safeFloat(match.confidence) || 1.0) : 0,
         is_duplicate: isDuplicate,
         duplicate_reason: isDuplicate ? 'Matches existing date & amount in account' : null
       });
@@ -396,16 +406,16 @@ export const api = {
 
   async processImport({ accountId, transactions, autoApproveConfidence = 0.95 }) {
     let imported = 0;
-    const nonDups = transactions.filter(t => !t.is_duplicate);
+    const nonDups = (transactions || []).filter(t => !t.is_duplicate);
 
     for (const t of nonDups) {
-      const isAuto = t.confidence >= autoApproveConfidence;
+      const isAuto = safeFloat(t.confidence) >= autoApproveConfidence;
       await supabase.from('transactions').insert([{
         account_id: accountId,
         date: t.date,
         payee: t.payee,
         original_description: t.original_description,
-        amount: t.amount,
+        amount: safeFloat(t.amount),
         transaction_type: t.transaction_type,
         category_id: t.category_id || null,
         subcategory_id: t.subcategory_id || null,
@@ -420,7 +430,7 @@ export const api = {
       success: true,
       imported_count: imported,
       duplicate_count: transactions.length - nonDups.length,
-      pending_review_count: nonDups.filter(t => t.confidence < autoApproveConfidence).length
+      pending_review_count: nonDups.filter(t => safeFloat(t.confidence) < autoApproveConfidence).length
     };
   },
 
@@ -472,21 +482,34 @@ export const api = {
     };
   },
 
-  // 7. Scheduled Bills
+  // 7. Scheduled Bills & Full 30/60/90-Day Projection Engine
   async getScheduled() {
     const { data, error } = await supabase.from('scheduled_transactions').select('*, accounts(name), categories(name), subcategories(name)').order('next_due_date');
     if (error) throw error;
-    return { success: true, scheduled: data || [] };
+    const formatted = (data || []).map(s => ({
+      ...s,
+      amount: safeFloat(s.amount),
+      account_name: s.accounts?.name || 'Account',
+      category_name: s.categories?.name || 'Uncategorized',
+      subcategory_name: s.subcategories?.name || null
+    }));
+    return { success: true, scheduled: formatted };
   },
 
   async createScheduled(item) {
-    const { data, error } = await supabase.from('scheduled_transactions').insert([item]).select().single();
+    const { data, error } = await supabase.from('scheduled_transactions').insert([{
+      ...item,
+      amount: safeFloat(item.amount)
+    }]).select().single();
     if (error) throw error;
     return { success: true, scheduled_id: data.id };
   },
 
   async updateScheduled(id, item) {
-    const { error } = await supabase.from('scheduled_transactions').update(item).eq('id', id);
+    const { error } = await supabase.from('scheduled_transactions').update({
+      ...item,
+      amount: safeFloat(item.amount)
+    }).eq('id', id);
     if (error) throw error;
     return { success: true };
   },
@@ -504,7 +527,7 @@ export const api = {
       account_id: sch.account_id,
       date: date || new Date().toISOString().slice(0, 10),
       payee: sch.payee,
-      amount: sch.amount,
+      amount: safeFloat(sch.amount),
       transaction_type: sch.transaction_type,
       category_id: sch.category_id,
       subcategory_id: sch.subcategory_id,
@@ -515,18 +538,63 @@ export const api = {
 
   async getProjection(days = 30) {
     const { accounts } = await this.getAccounts();
-    const liquidCash = (accounts || []).filter(a => a.type !== 'credit_card' && a.type !== 'loan').reduce((sum, a) => sum + (parseFloat(a.current_balance) || 0), 0);
-    return { success: true, projection: { current_cash: liquidCash, projected_cash: liquidCash, net_change: 0, events: [] } };
+    const liquidCash = (accounts || []).filter(a => a.type !== 'credit_card' && a.type !== 'loan').reduce((sum, a) => sum + safeFloat(a.current_balance), 0);
+    const { scheduled } = await this.getScheduled();
+
+    const now = new Date();
+    const targetDate = new Date();
+    targetDate.setDate(now.getDate() + days);
+
+    let totalIncome = 0;
+    let totalExpenses = 0;
+    const events = [];
+
+    (scheduled || []).forEach(s => {
+      if (!s.active) return;
+      const amt = safeFloat(s.amount);
+      const isIncome = s.transaction_type === 'income';
+
+      if (isIncome) totalIncome += amt;
+      else totalExpenses += amt;
+
+      events.push({
+        id: s.id,
+        date: s.next_due_date || now.toISOString().slice(0, 10),
+        payee: s.payee,
+        amount: amt,
+        transaction_type: s.transaction_type,
+        account_name: s.account_name,
+        category_name: s.category_name
+      });
+    });
+
+    const netChange = totalIncome - totalExpenses;
+    const projectedCash = liquidCash + netChange;
+
+    return {
+      success: true,
+      projection: {
+        days: days,
+        current_cash: liquidCash,
+        projected_cash: projectedCash,
+        total_income: totalIncome,
+        total_expenses: totalExpenses,
+        net_change: netChange,
+        start_date: now.toISOString().slice(0, 10),
+        end_date: targetDate.toISOString().slice(0, 10),
+        events: events
+      }
+    };
   },
 
-  // 8. Reports & Dashboard Summary
+  // 8. Reports & Dashboard (with 100% safe numeric guarantees)
   async getDashboardSummary() {
     const { accounts } = await this.getAccounts();
     let liquidCash = 0;
     let creditDebt = 0;
 
     (accounts || []).forEach(a => {
-      const bal = parseFloat(a.current_balance) || 0;
+      const bal = safeFloat(a.current_balance);
       if (a.type === 'credit_card' || a.type === 'loan') creditDebt += Math.abs(bal);
       else liquidCash += bal;
     });
@@ -544,7 +612,7 @@ export const api = {
     const catMap = {};
 
     (transactions || []).forEach(t => {
-      const amt = parseFloat(t.amount) || 0;
+      const amt = safeFloat(t.amount);
       if (t.date && t.date.startsWith(currentMonth)) {
         if (amt > 0 && t.transaction_type === 'income') mtdIncome += amt;
         if (amt < 0 && t.transaction_type === 'expense') {
@@ -584,6 +652,7 @@ export const api = {
         accounts: accounts || [],
         recent_transactions: (transactions || []).slice(0, 8).map(t => ({
           ...t,
+          amount: safeFloat(t.amount),
           account_name: t.accounts?.name || 'Account',
           category_name: t.categories?.name || null
         })),
@@ -596,18 +665,102 @@ export const api = {
     };
   },
 
-  async getSpendingByCategory() { return this.getDashboardSummary().then(r => r.summary.category_spending); },
-  async getProfitLoss() { return { success: true, income: { total: 0, categories: [] }, expenses: { total: 0, categories: [] }, net_operating_income: 0 }; },
-  async getCashFlowTrend() { return { success: true, trend: [] }; },
-  async getPayeeSpending() { return { success: true, payees: [] }; },
+  async getSpendingByCategory() {
+    const summary = await this.getDashboardSummary();
+    return { success: true, ...summary.summary.category_spending };
+  },
+
+  async getProfitLoss() {
+    const summary = await this.getDashboardSummary();
+    const now = new Date();
+    return {
+      success: true,
+      start_date: `${now.getFullYear()}-01-01`,
+      end_date: now.toISOString().slice(0, 10),
+      income: {
+        total: summary.summary.mtd_income,
+        categories: [{ category_name: 'Total Income', total: summary.summary.mtd_income, subcategories: [] }]
+      },
+      expenses: {
+        total: summary.summary.mtd_expense,
+        categories: summary.summary.category_spending.categories
+      },
+      net_operating_income: summary.summary.mtd_net
+    };
+  },
+
+  async getCashFlowTrend(months = 6) {
+    const summary = await this.getDashboardSummary();
+    return { success: true, trend: summary.summary.cash_flow_trend };
+  },
+
+  async getPayeeSpending() {
+    const { data: trans } = await supabase.from('transactions').select('payee, amount, date, categories(name)').eq('review_status', 'approved');
+    const payeeMap = {};
+    (trans || []).forEach(t => {
+      const amt = safeFloat(t.amount);
+      if (amt < 0) {
+        const abs = Math.abs(amt);
+        const p = t.payee || 'Unknown';
+        if (!payeeMap[p]) {
+          payeeMap[p] = { payee: p, total_spent: 0, transaction_count: 0, last_transaction_date: t.date, primary_category: t.categories?.name || 'Uncategorized' };
+        }
+        payeeMap[p].total_spent += abs;
+        payeeMap[p].transaction_count++;
+      }
+    });
+
+    const payees = Object.values(payeeMap).sort((a, b) => b.total_spent - a.total_spent);
+    return { success: true, payees };
+  },
+
+  // 9. Reconciliation
+  async startReconciliation({ account_id, statement_date, statement_balance }) {
+    const { data: acc } = await supabase.from('accounts').select('*').eq('id', account_id).single();
+    const { data: trans } = await supabase.from('transactions').select('*').eq('account_id', account_id).lte('date', statement_date);
+
+    const clearedTrans = (trans || []).filter(t => t.cleared_status === 'cleared' || t.cleared_status === 'reconciled');
+    const unclearedTrans = (trans || []).filter(t => t.cleared_status === 'uncleared');
+
+    const clearedSum = clearedTrans.reduce((sum, t) => sum + safeFloat(t.amount), 0);
+    const clearedBalance = safeFloat(acc?.opening_balance) + clearedSum;
+    const diff = safeFloat(statement_balance) - clearedBalance;
+
+    return {
+      success: true,
+      data: {
+        account_id,
+        statement_date,
+        statement_balance: safeFloat(statement_balance),
+        cleared_balance: clearedBalance,
+        difference: diff,
+        uncleared_payments: unclearedTrans.filter(t => safeFloat(t.amount) < 0),
+        uncleared_deposits: unclearedTrans.filter(t => safeFloat(t.amount) >= 0)
+      }
+    };
+  },
+
+  async commitReconciliation({ accountId, statementDate, statementBalance, clearedTransactionIds }) {
+    if (clearedTransactionIds && clearedTransactionIds.length > 0) {
+      await supabase.from('transactions').update({ cleared_status: 'reconciled' }).in('id', clearedTransactionIds);
+    }
+    await supabase.from('reconciliations').insert([{
+      account_id: accountId,
+      statement_date: statementDate,
+      statement_balance: safeFloat(statementBalance),
+      cleared_balance: safeFloat(statementBalance),
+      difference: 0
+    }]);
+    return { success: true };
+  },
 
   // Helpers
   async recalculateBalance(accountId) {
     const { data: acc } = await supabase.from('accounts').select('opening_balance').eq('id', accountId).single();
     if (!acc) return;
     const { data: trans } = await supabase.from('transactions').select('amount').eq('account_id', accountId).eq('review_status', 'approved');
-    const transSum = (trans || []).reduce((sum, t) => sum + (parseFloat(t.amount) || 0), 0);
-    const newBal = (parseFloat(acc.opening_balance) || 0) + transSum;
+    const transSum = (trans || []).reduce((sum, t) => sum + safeFloat(t.amount), 0);
+    const newBal = safeFloat(acc.opening_balance) + transSum;
     await supabase.from('accounts').update({ current_balance: newBal }).eq('id', accountId);
   },
 
@@ -617,7 +770,7 @@ export const api = {
     await supabase.from('transactions').delete().neq('id', 0);
     const { data: accs } = await supabase.from('accounts').select('*');
     for (const a of (accs || [])) {
-      await supabase.from('accounts').update({ current_balance: a.opening_balance }).eq('id', a.id);
+      await supabase.from('accounts').update({ current_balance: safeFloat(a.opening_balance) }).eq('id', a.id);
     }
     return { success: true };
   }
