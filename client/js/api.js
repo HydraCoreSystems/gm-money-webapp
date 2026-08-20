@@ -12,6 +12,25 @@ function safeFloat(val, fallback = 0) {
   return isNaN(n) ? fallback : n;
 }
 
+function extractAmount(str) {
+  if (!str) return null;
+  const raw = String(str).trim();
+  if (raw === '' || raw === '-' || raw === '$') return null;
+
+  const isAccountingNegative = /^\(.*\)$/.test(raw);
+  const isTrailingNegative = /[\d\.]+\-$/.test(raw);
+  const isLeadingNegative = raw.includes('-') || /\bDR\b/i.test(raw);
+  const isNegative = isAccountingNegative || isTrailingNegative || isLeadingNegative;
+
+  const cleaned = raw.replace(/[^\d\.]/g, '');
+  if (!cleaned || cleaned === '.') return null;
+
+  const num = parseFloat(cleaned);
+  if (isNaN(num) || num === 0) return null;
+
+  return isNegative ? -num : num;
+}
+
 function parseCSV(text) {
   const lines = [];
   let row = [];
@@ -52,7 +71,7 @@ export const api = {
     if (error) throw error;
     const formatted = (data || []).map(a => ({
       ...a,
-      institution: a.institution === 'Chase' ? 'PNC' : (a.institution || 'PNC'),
+      institution: a.institution === 'Chase' ? 'PNC Bank' : (a.institution || 'PNC Bank'),
       opening_balance: safeFloat(a.opening_balance),
       current_balance: safeFloat(a.current_balance)
     }));
@@ -63,7 +82,7 @@ export const api = {
     const openBal = safeFloat(acc.opening_balance);
     const { data, error } = await supabase.from('accounts').insert([{
       name: acc.name.trim(),
-      institution: acc.institution?.trim() || 'PNC',
+      institution: acc.institution?.trim() || 'PNC Bank',
       type: acc.type,
       opening_balance: openBal,
       current_balance: openBal,
@@ -76,7 +95,7 @@ export const api = {
   async updateAccount(id, acc) {
     const { error } = await supabase.from('accounts').update({
       name: acc.name?.trim(),
-      institution: acc.institution?.trim() || 'PNC',
+      institution: acc.institution?.trim() || 'PNC Bank',
       type: acc.type,
       opening_balance: safeFloat(acc.opening_balance),
       notes: acc.notes?.trim() || null,
@@ -290,7 +309,7 @@ export const api = {
   },
 
   // -------------------------------------------------------------
-  // 4. INTELLIGENT CELL-BY-CELL PNC PARSER
+  // 4. BULLETPROOF PNC & UNIVERSAL CSV PARSER
   // -------------------------------------------------------------
   async previewCSV(csvContent, accountId) {
     const allLines = parseCSV(csvContent);
@@ -309,7 +328,7 @@ export const api = {
     allLines.forEach(row => {
       if (!row || row.length < 2) return;
 
-      // 1. Find Date cell
+      // 1. Locate Date Cell
       let formattedDate = null;
       let dateColIdx = -1;
 
@@ -327,10 +346,10 @@ export const api = {
         }
       }
 
-      // If row has no date (e.g. Header line or bank summary), skip it
+      // Skip non-transaction rows (like file headers or account titles)
       if (!formattedDate) return;
 
-      // 2. Find Payee / Description cell (longest text cell with letters)
+      // 2. Locate Description / Payee Cell
       let rawDesc = '';
       let descColIdx = -1;
 
@@ -344,33 +363,26 @@ export const api = {
       }
       if (!rawDesc) rawDesc = 'Bank Transaction';
 
-      // 3. Find Amount: Extract all numeric float cells
-      const numberCells = [];
+      // 3. Extract Number Cells
+      const foundNumbers = [];
       for (let i = 0; i < row.length; i++) {
         if (i === dateColIdx || i === descColIdx) continue;
-        const cleaned = row[i].replace(/[\$,]/g, '').trim();
-        if (/^[\-\+]?\d+(\.\d+)?$/.test(cleaned)) {
-          const val = parseFloat(cleaned);
-          if (!isNaN(val) && val !== 0) {
-            numberCells.push({ col: i, val });
-          }
+        const num = extractAmount(row[i]);
+        if (num !== null) {
+          foundNumbers.push({ col: i, val: num });
         }
       }
 
       let finalAmount = 0;
       let transType = 'expense';
 
-      if (numberCells.length === 1) {
-        finalAmount = numberCells[0].val;
-        transType = finalAmount >= 0 ? 'income' : 'expense';
-      } else if (numberCells.length >= 2) {
-        // In bank exports (Withdrawals, Deposits, Balance), the first number is usually the transaction amount
-        const firstNum = numberCells[0].val;
-        finalAmount = firstNum;
-        transType = finalAmount >= 0 ? 'income' : 'expense';
+      if (foundNumbers.length === 1) {
+        finalAmount = foundNumbers[0].val;
+      } else if (foundNumbers.length >= 2) {
+        // In bank files [Withdrawals, Deposits, Balance], the transaction amount is the first number cell
+        finalAmount = foundNumbers[0].val;
       }
 
-      // If amount was positive, but description clearly indicates an expense (purchase, card, pos, sub, plan)
       const descLower = rawDesc.toLowerCase();
       const isPurchase = /(purchase|card|pos|debit|plan|sub|store|fee|payment)/i.test(descLower);
       const isCredit = /(deposit|credit|refund|payroll|transfer from)/i.test(descLower);
@@ -381,6 +393,8 @@ export const api = {
       } else if (isCredit && finalAmount < 0) {
         finalAmount = Math.abs(finalAmount);
         transType = 'income';
+      } else {
+        transType = finalAmount >= 0 ? 'income' : 'expense';
       }
 
       const cleanPayee = rawDesc.replace(/(#\d+|store\s*\d+|pos\s*debit|purchase\s*authorized\s*on\s*[\d\/]+|card\d+|xxxxxxxxxxxx\d+)/gi, '').trim() || rawDesc;
