@@ -318,7 +318,7 @@ export const api = {
     const { rules } = await this.getMerchantRules();
     let existingTrans = [];
     if (accountId) {
-      const { data } = await supabase.from('transactions').select('date, amount, payee, original_description').eq('account_id', accountId);
+      const { data } = await supabase.from('transactions').select('date, amount, payee, original_description').eq('account_id', accountId).neq('amount', 0);
       existingTrans = data || [];
     }
 
@@ -346,7 +346,7 @@ export const api = {
         }
       }
 
-      // Skip non-transaction rows (like file headers or account titles)
+      // Skip non-transaction rows (like headers)
       if (!formattedDate) return;
 
       // 2. Locate Description / Payee Cell
@@ -379,7 +379,6 @@ export const api = {
       if (foundNumbers.length === 1) {
         finalAmount = foundNumbers[0].val;
       } else if (foundNumbers.length >= 2) {
-        // In bank files [Withdrawals, Deposits, Balance], the transaction amount is the first number cell
         finalAmount = foundNumbers[0].val;
       }
 
@@ -445,6 +444,9 @@ export const api = {
       if (accs && accs[0]) accId = accs[0].id;
       else throw new Error('Please create at least one account under Accounts before importing');
     }
+
+    // Automatically remove any old $0.00 placeholder transactions from database
+    await supabase.from('transactions').delete().eq('amount', 0);
 
     const nonDups = (transactions || []).filter(t => !t.is_duplicate);
 
