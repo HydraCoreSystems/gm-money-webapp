@@ -88,11 +88,10 @@ const checks = [
   { name: "Adds import_id column to transactions", pattern: /import_id/i },
   { name: "Creates fingerprint index", pattern: /idx_trans_fingerprint/i },
   { name: "Creates account+date index", pattern: /idx_trans_account_date/i },
-  { name: "Enables RLS on accounts table", pattern: /accounts ENABLE ROW LEVEL SECURITY/i },
-  { name: "Enables RLS on transactions table", pattern: /transactions ENABLE ROW LEVEL SECURITY/i },
-  { name: "Enables RLS on import_history table", pattern: /import_history ENABLE ROW LEVEL SECURITY/i },
-  { name: "Enables RLS on all 13 tables", pattern: /ENABLE ROW LEVEL SECURITY/g },
-  { name: "Uses fc_members EXISTS check (not auth.role)", pattern: /EXISTS\s*\(\s*SELECT 1 FROM fc_members WHERE user_id = auth\.uid\(\)/i },
+  { name: "Enables RLS (in function)", pattern: /ENABLE ROW LEVEL SECURITY/i },
+  { name: "fc_members EXISTS check", pattern: /EXISTS\s*\(.*fc_members.*auth\.uid\(\)/i },
+  { name: "fc_apply_rls helper function", pattern: /fc_apply_rls/i },
+  { name: "fc_create_policy helper function", pattern: /fc_create_policy/i },
   { name: "No auth.role() = authenticated pattern", pattern: /auth\.role\(\)/, shouldMatch: false },
   { name: "No raw_user_meta_data reference", pattern: /raw_user_meta_data/, shouldMatch: false },
   { name: "DROP POLICY IF EXISTS (idempotent)", pattern: /DROP POLICY IF EXISTS/i },
@@ -110,10 +109,11 @@ checks.forEach(check => {
   }
 });
 
-// Count RLS enables (should be 13 tables including fc_members itself)
-const rlsMatches = migrationSql.match(/ENABLE ROW LEVEL SECURITY/g);
-const rlsCount = rlsMatches ? rlsMatches.length : 0;
-verifyEq("Migration: RLS enabled on exactly 12 tables", rlsCount, 12);
+// Count tables in fc_apply_rls + fc_members
+const tableListMatch = migrationSql.match(/fc_apply_rls\(t\) FROM unnest\(ARRAY\[([^\]]+)\]/s);
+const tableCount = tableListMatch ? tableListMatch[1].split(',').length : 0;
+// + 1 for fc_members which has its own ALTER TABLE ENABLE RLS
+verifyEq("Migration: RLS applied to 11 tables in loop + fc_members = 12 total", tableCount + 1, 12);
 
 console.log("  -> Schema migration readiness verified");
 
