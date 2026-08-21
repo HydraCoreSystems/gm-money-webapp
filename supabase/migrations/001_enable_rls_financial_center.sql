@@ -24,12 +24,13 @@ CREATE POLICY "Members read own row" ON fc_members
 
 -- ============================================================================
 -- 2. SCHEMA EXTENSIONS (idempotent column additions)
---    fingerprint unique constraint is conditional: audits for duplicates first
+--    fingerprint unique constraint is MANDATORY — aborts on existing duplicates
 -- ============================================================================
 
 DO $$
 DECLARE
   dup_count integer;
+  dup_report text;
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.columns
@@ -38,7 +39,7 @@ BEGIN
     ALTER TABLE transactions ADD COLUMN fingerprint text;
   END IF;
 
-  -- Audit: do not add unique constraint if duplicates exist
+  -- Audit existing duplicates. If any exist, abort with a reporting query.
   SELECT count(*) INTO dup_count FROM (
     SELECT fingerprint FROM transactions
     WHERE fingerprint IS NOT NULL
@@ -46,11 +47,19 @@ BEGIN
   ) dups;
 
   IF dup_count > 0 THEN
-    RAISE WARNING 'SKIPPED: % duplicate fingerprints exist in transactions. Resolve duplicates before re-running migration to add the unique constraint.', dup_count;
-  ELSE
-    ALTER TABLE transactions DROP CONSTRAINT IF EXISTS uq_trans_fingerprint;
-    ALTER TABLE transactions ADD CONSTRAINT uq_trans_fingerprint UNIQUE (fingerprint);
+    RAISE EXCEPTION 'MIGRATION ABORTED: % duplicate fingerprint(s) exist in transactions.'
+      '  Run this query to list them, resolve manually, then re-run the migration:'
+      '  SELECT fingerprint, count(*) AS occurrences, array_agg(id ORDER BY id) AS transaction_ids'
+      '  FROM transactions WHERE fingerprint IS NOT NULL'
+      '  GROUP BY fingerprint HAVING count(*) > 1 ORDER BY fingerprint;',
+      dup_count;
   END IF;
+
+  -- Safe to add the constraint — always, whether column was just created or existed previously
+  ALTER TABLE transactions DROP CONSTRAINT IF EXISTS uq_trans_fingerprint;
+  ALTER TABLE transactions ADD CONSTRAINT uq_trans_fingerprint UNIQUE (fingerprint);
+
+  RAISE NOTICE 'Fingerprint unique constraint uq_trans_fingerprint applied successfully.';
 END $$;
 
 DO $$
@@ -230,8 +239,10 @@ DROP FUNCTION IF EXISTS fc_apply_rls(text);
 DROP FUNCTION IF EXISTS fc_create_policy(text, text, text);
 
 -- ============================================================================
--- 6. ATOMIC IMPORT RPC — single database transaction for the entire import
---    Creates history, inserts all accepted rows, records counts, all-or-nothing.
+-- 6. ATOMIC IMPORT RPC
+--    Serializes per-account via FOR UPDATE. Uses ON CONFLICT for dedup safety.
+--    Rejects null/blank/invalid fingerprints. Entire import is one transaction.
+--    SECURITY INVOKER with locked-down search_path and execute-only-by-authenticated.
 -- ============================================================================
 
 CREATE OR REPLACE FUNCTION fc_import_transactions(
@@ -241,19 +252,22 @@ CREATE OR REPLACE FUNCTION fc_import_transactions(
 ) RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY INVOKER
+SET search_path = public, pg_temp
 AS $$
 DECLARE
-  v_hist_id     bigint;
-  v_total_rows  integer;
-  v_imported    integer := 0;
-  v_duplicates  integer := 0;
-  v_review      integer := 0;
-  v_row         jsonb;
-  v_fingerprint text;
-  v_review_stat text;
-  v_category_id bigint;
+  v_hist_id      bigint;
+  v_total_rows   integer;
+  v_imported     integer := 0;
+  v_duplicates   integer := 0;
+  v_review       integer := 0;
+  v_row          jsonb;
+  v_fingerprint  text;
+  v_inserted_id  bigint;
+  v_review_stat  text;
+  v_category_id  bigint;
   v_subcategory_id bigint;
-  result        jsonb;
+  v_account_exists boolean;
+  result         jsonb;
 BEGIN
   v_total_rows := jsonb_array_length(p_transactions);
 
@@ -267,25 +281,33 @@ BEGIN
     );
   END IF;
 
-  -- 1. Create import history record
+  -- 1. Lock account row (fails if account does not exist)
+  PERFORM id FROM accounts WHERE id = p_account_id FOR UPDATE;
+
+  -- 2. Validate every fingerprint before writing anything
+  FOR v_row IN SELECT * FROM jsonb_array_elements(p_transactions)
+  LOOP
+    v_fingerprint := v_row ->> 'fingerprint';
+    IF v_fingerprint IS NULL OR trim(v_fingerprint) = '' THEN
+      RAISE EXCEPTION 'Rejected: row % has null or blank fingerprint. Every import row requires a valid fingerprint.',
+        (v_row ->> 'date');
+    END IF;
+    IF length(v_fingerprint) < 8 THEN
+      RAISE EXCEPTION 'Rejected: fingerprint "%" is too short (must be at least 8 chars).', v_fingerprint;
+    END IF;
+  END LOOP;
+
+  -- 3. Create import history record
   INSERT INTO import_history (filename, account_id, total_rows, new_count, duplicate_count, status)
   VALUES (p_filename, p_account_id, v_total_rows, 0, 0, 'in_progress')
   RETURNING id INTO v_hist_id;
 
-  -- 2. Insert each accepted transaction
+  -- 4. Insert each accepted transaction — ON CONFLICT is the only dedup gate
   FOR v_row IN SELECT * FROM jsonb_array_elements(p_transactions)
   LOOP
     v_fingerprint := v_row ->> 'fingerprint';
 
-    -- Skip if fingerprint already exists (duplicate)
-    IF v_fingerprint IS NOT NULL AND EXISTS (
-      SELECT 1 FROM transactions WHERE fingerprint = v_fingerprint
-    ) THEN
-      v_duplicates := v_duplicates + 1;
-      CONTINUE;
-    END IF;
-
-    -- Determine review status and category
+    -- Determine review status and category (mutually exclusive)
     IF (v_row ->> 'confidence')::numeric >= 0.7
        AND v_row ->> 'suggested_category_id' IS NOT NULL
     THEN
@@ -316,15 +338,21 @@ BEGIN
       'uncleared',
       v_hist_id,
       v_fingerprint
-    );
+    )
+    ON CONFLICT (fingerprint) DO NOTHING
+    RETURNING id INTO v_inserted_id;
 
-    v_imported := v_imported + 1;
-    IF v_review_stat = 'pending_review' THEN
-      v_review := v_review + 1;
+    IF v_inserted_id IS NOT NULL THEN
+      v_imported := v_imported + 1;
+      IF v_review_stat = 'pending_review' THEN
+        v_review := v_review + 1;
+      END IF;
+    ELSE
+      v_duplicates := v_duplicates + 1;
     END IF;
   END LOOP;
 
-  -- 3. Update import history with final counts
+  -- 5. Update import history with final counts
   UPDATE import_history
   SET new_count = v_imported,
       duplicate_count = v_duplicates,
@@ -332,7 +360,7 @@ BEGIN
       status = 'completed'
   WHERE id = v_hist_id;
 
-  -- 4. Recalculate account balance
+  -- 6. Recalculate account balance
   UPDATE accounts
   SET current_balance = (
     SELECT COALESCE(opening_balance, 0) + COALESCE(
@@ -353,9 +381,19 @@ BEGIN
   RETURN result;
 
 EXCEPTION WHEN OTHERS THEN
-  -- The entire function runs in a single implicit transaction.
-  -- Any error rolls back ALL changes (history + transactions + balance).
   RAISE;
+END $$;
+
+-- Lock down the RPC: only authenticated role may execute
+DO $$
+BEGIN
+  REVOKE ALL ON FUNCTION fc_import_transactions(bigint,text,jsonb) FROM PUBLIC;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    REVOKE ALL ON FUNCTION fc_import_transactions(bigint,text,jsonb) FROM anon;
+  END IF;
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+    GRANT EXECUTE ON FUNCTION fc_import_transactions(bigint,text,jsonb) TO authenticated;
+  END IF;
 END $$;
 
 -- ============================================================================

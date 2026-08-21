@@ -96,7 +96,7 @@ const checks = [
   { name: "No raw_user_meta_data reference", pattern: /raw_user_meta_data/, shouldMatch: false },
   { name: "DROP POLICY IF EXISTS (idempotent)", pattern: /DROP POLICY IF EXISTS/i },
   { name: "TO authenticated on policies", pattern: /TO authenticated/i },
-  { name: "Fingerprint duplicate audit", pattern: /duplicate fingerprints exist/i },
+  { name: "Fingerprint duplicate audit", pattern: /duplicate fingerprint/i },
   { name: "Atomic import RPC exists", pattern: /fc_import_transactions/i },
   { name: "Enrollment instructions present", pattern: /INSERT INTO fc_members/i },
   { name: "Verification queries present", pattern: /SELECT tablename FROM pg_tables/i },
