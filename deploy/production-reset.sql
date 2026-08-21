@@ -1,25 +1,6 @@
-﻿-- ============================================================
--- Gathering Moss Financial Center -- Production Reset & Deployment
--- GENERATED FILE -- do not edit directly.
--- Source: deploy/src/*.sql + supabase/migrations/001_enable_rls_financial_center.sql
--- Regenerate: pwsh -Command "Get-Content deploy/src/preflight.sql, deploy/src/clear.sql, supabase/migrations/001_enable_rls_financial_center.sql, deploy/src/enroll.sql, deploy/src/verify.sql | Set-Content deploy/production-reset.sql"
---
--- Before running:
---   1. Run deploy/backup.sql to create a pre-reset backup.
---   2. Replace all {{PLACEHOLDER}} values below.
---   3. Review the complete script.
---   4. Run in Supabase Dashboard SQL Editor.
--- ============================================================
+BEGIN; \echo GATHERING MOSS -- PRODUCTION RESET
 
-BEGIN;
-
-\echo '========================================'
-\echo '  GATHERING MOSS -- PRODUCTION RESET'
-\echo '========================================'
-
--- ================================================================
--- PHASE: preflight (validates UUIDs, balances, account state)
--- ================================================================
+-- PHASE: preflight
 -- ================================================================
 -- phase: preflight
 -- Validates environment, owner UUIDs, opening balances, account state
@@ -59,29 +40,7 @@ BEGIN
 END $$;
 
 -- ================================================================
--- 2. Validate opening balances
--- ================================================================
-DO $$
-DECLARE
-    chk_bal numeric := NULLIF('{{CHECKING_OPENING_BALANCE}}', 'UNSET');
-    sav_bal numeric := NULLIF('{{SAVINGS_OPENING_BALANCE}}', 'UNSET');
-    csh_bal numeric := NULLIF('{{CASH_OPENING_BALANCE}}', 'UNSET');
-BEGIN
-    IF chk_bal IS NULL THEN
-        RAISE EXCEPTION 'CHECKING_OPENING_BALANCE is UNSET. Replace with the intended value (0.00 is acceptable only if explicitly chosen).';
-    END IF;
-    IF sav_bal IS NULL THEN
-        RAISE EXCEPTION 'SAVINGS_OPENING_BALANCE is UNSET. Replace with the intended value.';
-    END IF;
-    IF csh_bal IS NULL THEN
-        RAISE EXCEPTION 'CASH_OPENING_BALANCE is UNSET. Replace with the intended value.';
-    END IF;
-
-    RAISE NOTICE 'Opening balances confirmed: checking=%, savings=%, cash=%', chk_bal, sav_bal, csh_bal;
-END $$;
-
--- ================================================================
--- 3. Verify exactly three accounts: 1 checking, 1 savings, 1 cash, no extras
+-- 2. Verify exactly three accounts: 1 checking, 1 savings, 1 cash, no extras
 -- ================================================================
 DO $$
 DECLARE
@@ -132,9 +91,7 @@ BEGIN
         (SELECT count(*) FROM _pre_reset_subs);
 END $$;
 
--- ================================================================
--- PHASE: clear (removes all transactional data)
--- ================================================================
+-- PHASE: clear
 -- ================================================================
 -- phase: clear
 -- Removes all transactional data. Runs after preflight, before migration.
@@ -156,13 +113,10 @@ END $$;
 
 DELETE FROM transactions;
 
--- Set opening balances to explicitly confirmed values
-UPDATE accounts SET opening_balance = NULLIF('{{CHECKING_OPENING_BALANCE}}', 'UNSET')::numeric WHERE type = 'checking';
-UPDATE accounts SET opening_balance = NULLIF('{{SAVINGS_OPENING_BALANCE}}',  'UNSET')::numeric WHERE type = 'savings';
-UPDATE accounts SET opening_balance = NULLIF('{{CASH_OPENING_BALANCE}}',     'UNSET')::numeric WHERE type = 'cash';
-
--- Reset current balances to opening balances
-UPDATE accounts SET current_balance = opening_balance, updated_at = now();
+-- Set opening balances to NULL: "balance not yet established"
+-- Each account's opening balance will be calculated atomically
+-- during its first PNC import (statement_balance - net of imported txns).
+UPDATE accounts SET opening_balance = NULL, current_balance = 0, updated_at = now();
 
 DO $$
 DECLARE
@@ -170,23 +124,20 @@ DECLARE
 BEGIN
     SELECT count(*) INTO t_count FROM transactions;
     IF t_count != 0 THEN
-        RAISE EXCEPTION 'FAIL: transactions not empty after clear â€” % rows remain', t_count;
+        RAISE EXCEPTION 'FAIL: transactions not empty after clear — % rows remain', t_count;
     END IF;
     RAISE NOTICE 'Transactional data cleared. transactions=0, splits=0, attachments=0, reconciliations=0.';
 END $$;
 
--- ================================================================
--- PHASE: migrate (canonical Financial Center schema + RLS + RPC)
--- Source: supabase/migrations/001_enable_rls_financial_center.sql
--- ================================================================
+-- PHASE: migrate (canonical)
 -- ============================================================================
 -- Gathering Moss Financial Center: Unified Schema, Owner-Only RLS & Atomic Import
--- Repeatable â€” safe to run multiple times. Does not touch unrelated tables.
+-- Repeatable — safe to run multiple times. Does not touch unrelated tables.
 -- ============================================================================
 
 -- ============================================================================
 -- 1. FINANCIAL CENTER MEMBERSHIP TABLE
---    SELECT: members read own row only (user_id = auth.uid()) â€” no recursion
+--    SELECT: members read own row only (user_id = auth.uid()) — no recursion
 --    No INSERT / UPDATE / DELETE policies (service_role / dashboard only)
 -- ============================================================================
 
@@ -205,7 +156,7 @@ CREATE POLICY "Members read own row" ON fc_members
 
 -- ============================================================================
 -- 2. SCHEMA EXTENSIONS (idempotent column additions)
---    fingerprint unique constraint is MANDATORY â€” aborts on existing duplicates
+--    fingerprint unique constraint is MANDATORY — aborts on existing duplicates
 -- ============================================================================
 
 DO $$
@@ -236,7 +187,7 @@ BEGIN
       dup_count;
   END IF;
 
-  -- Safe to add the constraint â€” always, whether column was just created or existed previously
+  -- Safe to add the constraint — always, whether column was just created or existed previously
   ALTER TABLE transactions DROP CONSTRAINT IF EXISTS uq_trans_fingerprint;
   ALTER TABLE transactions ADD CONSTRAINT uq_trans_fingerprint UNIQUE (fingerprint);
 
@@ -252,6 +203,10 @@ BEGIN
     ALTER TABLE transactions ADD COLUMN import_id bigint;
   END IF;
 END $$;
+
+-- Allow NULL opening_balance: "balance not yet established" state
+-- NULL means the first import must provide a statement balance to calculate opening.
+ALTER TABLE IF EXISTS accounts ALTER COLUMN opening_balance DROP NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_trans_account_date ON transactions(account_id, date);
 CREATE INDEX IF NOT EXISTS idx_trans_category ON transactions(category_id, subcategory_id);
@@ -338,7 +293,7 @@ BEGIN
 END $$;
 
 -- ============================================================================
--- 5. ROW-LEVEL SECURITY â€” TO authenticated belt-and-suspenders + fc_members gate
+-- 5. ROW-LEVEL SECURITY — TO authenticated belt-and-suspenders + fc_members gate
 -- ============================================================================
 
 CREATE OR REPLACE FUNCTION fc_apply_rls(target_table text) RETURNS void AS $$
@@ -429,7 +384,8 @@ DROP FUNCTION IF EXISTS fc_create_policy(text, text, text);
 CREATE OR REPLACE FUNCTION fc_import_transactions(
   p_account_id  bigint,
   p_filename    text,
-  p_transactions jsonb
+  p_transactions jsonb,
+  p_statement_balance numeric DEFAULT NULL
 ) RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY INVOKER
@@ -447,7 +403,9 @@ DECLARE
   v_review_stat  text;
   v_category_id  bigint;
   v_subcategory_id bigint;
-  v_account_exists boolean;
+  v_imported_net numeric := 0;
+  v_opening      numeric;
+  v_opening_was_null boolean := false;
   result         jsonb;
 BEGIN
   v_total_rows := jsonb_array_length(p_transactions);
@@ -458,7 +416,8 @@ BEGIN
       'import_id', null,
       'imported_count', 0,
       'duplicate_count', 0,
-      'review_required_count', 0
+      'review_required_count', 0,
+      'opening_established', false
     );
   END IF;
 
@@ -486,7 +445,7 @@ BEGIN
   VALUES (p_filename, p_account_id, v_total_rows, 0, 0, 'in_progress')
   RETURNING id INTO v_hist_id;
 
-  -- 4. Insert each accepted transaction â€” ON CONFLICT is the only dedup gate
+  -- 4. Insert each accepted transaction — ON CONFLICT is the only dedup gate
   FOR v_row IN SELECT * FROM jsonb_array_elements(p_transactions)
   LOOP
     v_fingerprint := v_row ->> 'fingerprint';
@@ -528,6 +487,7 @@ BEGIN
 
     IF v_inserted_id IS NOT NULL THEN
       v_imported := v_imported + 1;
+      v_imported_net := v_imported_net + (v_row ->> 'amount')::numeric;
       IF v_review_stat = 'pending_review' THEN
         v_review := v_review + 1;
       END IF;
@@ -536,7 +496,18 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- 5. Update import history with final counts
+  -- 5. Establish opening balance from statement balance on first import
+  SELECT opening_balance INTO v_opening FROM accounts WHERE id = p_account_id;
+  v_opening_was_null := v_opening IS NULL;
+  IF v_opening_was_null AND v_imported > 0 THEN
+    IF p_statement_balance IS NULL THEN
+      RAISE EXCEPTION 'First import for this account: statement_balance is required to establish the opening balance. Provide the statement ending balance as of the last transaction date.';
+    END IF;
+    v_opening := p_statement_balance - v_imported_net;
+    UPDATE accounts SET opening_balance = v_opening WHERE id = p_account_id;
+  END IF;
+
+  -- 6. Update import history with final counts
   UPDATE import_history
   SET new_count = v_imported,
       duplicate_count = v_duplicates,
@@ -544,7 +515,7 @@ BEGIN
       status = 'completed'
   WHERE id = v_hist_id;
 
-  -- 6. Recalculate account balance
+  -- 7. Recalculate account balance
   UPDATE accounts
   SET current_balance = (
     SELECT COALESCE(opening_balance, 0) + COALESCE(
@@ -561,6 +532,10 @@ BEGIN
     'duplicate_count', v_duplicates,
     'review_required_count', v_review
   );
+  result := result || jsonb_build_object(
+    'opening_established', (v_opening_was_null AND v_imported > 0),
+    'established_opening_balance', (SELECT opening_balance FROM accounts WHERE id = p_account_id)
+  );
 
   RETURN result;
 
@@ -571,12 +546,12 @@ END $$;
 -- Lock down the RPC: only authenticated role may execute
 DO $$
 BEGIN
-  REVOKE ALL ON FUNCTION fc_import_transactions(bigint,text,jsonb) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION fc_import_transactions(bigint,text,jsonb,numeric) FROM PUBLIC;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
-    REVOKE ALL ON FUNCTION fc_import_transactions(bigint,text,jsonb) FROM anon;
+    REVOKE ALL ON FUNCTION fc_import_transactions(bigint,text,jsonb,numeric) FROM anon;
   END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
-    GRANT EXECUTE ON FUNCTION fc_import_transactions(bigint,text,jsonb) TO authenticated;
+    GRANT EXECUTE ON FUNCTION fc_import_transactions(bigint,text,jsonb,numeric) TO authenticated;
   END IF;
 END $$;
 
@@ -654,9 +629,7 @@ END $$;
 --   SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND rowsecurity = true;
 --   SELECT tablename, policyname, cmd, roles FROM pg_policies WHERE schemaname = 'public' ORDER BY tablename, cmd;
 
--- ================================================================
--- PHASE: enroll (atomic owner enrollment in fc_members)
--- ================================================================
+-- PHASE: enroll
 -- ================================================================
 -- phase: enroll
 -- Atomically enrolls both Phil and Crystal into fc_members.
@@ -690,9 +663,7 @@ BEGIN
     RAISE NOTICE 'Both owners enrolled in fc_members.';
 END $$;
 
--- ================================================================
--- PHASE: verify (post-deployment assertions before COMMIT)
--- ================================================================
+-- PHASE: verify
 -- ================================================================
 -- phase: verify
 -- Post-deployment assertions. Must all pass before COMMIT.
@@ -767,13 +738,17 @@ BEGIN
     END IF;
     RAISE NOTICE 'PASS: both owners enrolled in fc_members.';
 
-    -- 6. Current balances equal opening balances
+    -- 6. Opening balances are NULL (balance not yet established)
+    --    Balances are set atomically during the first PNC import.
     FOR r IN SELECT name, opening_balance, current_balance FROM accounts LOOP
-        IF r.current_balance != r.opening_balance THEN
-            RAISE EXCEPTION 'FAIL: % current=%, opening=%', r.name, r.current_balance, r.opening_balance;
+        IF r.opening_balance IS NOT NULL THEN
+            RAISE EXCEPTION 'FAIL: % opening_balance should be NULL (balance not yet established), got %', r.name, r.opening_balance;
+        END IF;
+        IF r.current_balance != 0 THEN
+            RAISE EXCEPTION 'FAIL: % current_balance should be 0, got %', r.name, r.current_balance;
         END IF;
     END LOOP;
-    RAISE NOTICE 'PASS: all current balances equal opening balances.';
+    RAISE NOTICE 'PASS: all accounts in balance-not-established state (opening=NULL, current=0).';
 
     -- 7. RLS on all FC tables
     IF (SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND rowsecurity = true AND tablename = ANY(ARRAY[
@@ -803,13 +778,6 @@ DROP TABLE IF EXISTS _pre_reset_categories;
 DROP TABLE IF EXISTS _pre_reset_subs;
 DROP TABLE IF EXISTS _pre_reset_trans_count;
 
-\echo ''
-\echo '========================================'
-\echo '  DEPLOYMENT SUCCESSFUL'
-\echo '========================================'
-
+\echo DEPLOYMENT SUCCESSFUL
 COMMIT;
-
-\echo ''
-\echo 'Owners enrolled. Anonymous access blocked. RLS active. Fresh start ready.'
-\echo 'Next: verify access (anon=denied, Phil+Crystal=full), set opening balances, deploy app, import PNC CSV.'
+\echo 'Owners enrolled. Opening balances NULL -- established atomically during first PNC import.'

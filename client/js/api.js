@@ -26,8 +26,9 @@ export const api = {
     const formatted = accounts.map(a => ({
       ...a,
       institution: a.institution || 'Bank',
-      opening_balance: safeFloat(a.opening_balance),
-      current_balance: safeFloat(a.current_balance)
+      opening_balance: a.opening_balance !== null && a.opening_balance !== undefined ? safeFloat(a.opening_balance) : null,
+      current_balance: a.current_balance !== null && a.current_balance !== undefined ? safeFloat(a.current_balance) : 0,
+      balance_established: a.opening_balance !== null && a.opening_balance !== undefined
     })).sort((a, b) => {
       if (a.type === 'checking') return -1;
       if (b.type === 'checking') return 1;
@@ -437,7 +438,7 @@ export const api = {
     };
   },
 
-  async processImport({ filename, accountId, account_id, transactions }) {
+  async processImport({ filename, accountId, account_id, transactions, statementBalance }) {
     const accId = parseInt(accountId || account_id, 10);
     if (isNaN(accId)) {
       throw new Error('Destination account ID is required for import');
@@ -449,7 +450,11 @@ export const api = {
       return { success: true, imported_count: 0, duplicate_count: (transactions || []).length, review_required_count: 0 };
     }
 
-    // Partition: each transaction belongs to exactly one outcome
+    // Check if account needs balance establishment
+    const { accounts } = await this.getAccounts();
+    const account = (accounts || []).find(a => a.id === accId);
+    const needsOpening = account && account.opening_balance == null;
+
     const payloadRows = nonDups.map(t => {
       const highConf = (t.confidence ?? 0) >= 0.7;
       const hasSuggestion = t.suggested_category_id != null;
@@ -468,16 +473,25 @@ export const api = {
       };
     });
 
-    // Verify classification is mutually exclusive
     const approveCount = payloadRows.filter(r => r.meta.highConf && r.meta.hasSuggestion).length;
     const reviewCount = payloadRows.length - approveCount;
 
-    // Call the atomic RPC — everything succeeds or nothing persists
-    const { data: result, error: rpcError } = await supabase.rpc('fc_import_transactions', {
+    // Build RPC parameters
+    const rpcParams = {
       p_account_id: accId,
       p_filename: filename || 'manual_import.csv',
       p_transactions: payloadRows
-    });
+    };
+
+    // If balance not yet established, require statement_balance
+    if (needsOpening) {
+      if (statementBalance == null) {
+        throw new Error('First import for this account requires a statement balance. Please provide the statement ending balance on the last transaction date.');
+      }
+      rpcParams.p_statement_balance = safeFloat(statementBalance);
+    }
+
+    const { data: result, error: rpcError } = await supabase.rpc('fc_import_transactions', rpcParams);
 
     if (rpcError) {
       throw new Error('Import failed: ' + rpcError.message);
@@ -493,6 +507,7 @@ export const api = {
       imported_count: result.imported_count,
       duplicate_count: result.duplicate_count,
       review_required_count: result.review_required_count,
+      opening_established: result.opening_established || false,
       classified: { approved: approveCount, review: reviewCount }
     };
   },

@@ -72,13 +72,17 @@ BEGIN
     END IF;
     RAISE NOTICE 'PASS: both owners enrolled in fc_members.';
 
-    -- 6. Current balances equal opening balances
+    -- 6. Opening balances are NULL (balance not yet established)
+    --    Balances are set atomically during the first PNC import.
     FOR r IN SELECT name, opening_balance, current_balance FROM accounts LOOP
-        IF r.current_balance != r.opening_balance THEN
-            RAISE EXCEPTION 'FAIL: % current=%, opening=%', r.name, r.current_balance, r.opening_balance;
+        IF r.opening_balance IS NOT NULL THEN
+            RAISE EXCEPTION 'FAIL: % opening_balance should be NULL (balance not yet established), got %', r.name, r.opening_balance;
+        END IF;
+        IF r.current_balance != 0 THEN
+            RAISE EXCEPTION 'FAIL: % current_balance should be 0, got %', r.name, r.current_balance;
         END IF;
     END LOOP;
-    RAISE NOTICE 'PASS: all current balances equal opening balances.';
+    RAISE NOTICE 'PASS: all accounts in balance-not-established state (opening=NULL, current=0).';
 
     -- 7. RLS on all FC tables
     IF (SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND rowsecurity = true AND tablename = ANY(ARRAY[

@@ -37,29 +37,7 @@ BEGIN
 END $$;
 
 -- ================================================================
--- 2. Validate opening balances
--- ================================================================
-DO $$
-DECLARE
-    chk_bal numeric := NULLIF('{{CHECKING_OPENING_BALANCE}}', 'UNSET');
-    sav_bal numeric := NULLIF('{{SAVINGS_OPENING_BALANCE}}', 'UNSET');
-    csh_bal numeric := NULLIF('{{CASH_OPENING_BALANCE}}', 'UNSET');
-BEGIN
-    IF chk_bal IS NULL THEN
-        RAISE EXCEPTION 'CHECKING_OPENING_BALANCE is UNSET. Replace with the intended value (0.00 is acceptable only if explicitly chosen).';
-    END IF;
-    IF sav_bal IS NULL THEN
-        RAISE EXCEPTION 'SAVINGS_OPENING_BALANCE is UNSET. Replace with the intended value.';
-    END IF;
-    IF csh_bal IS NULL THEN
-        RAISE EXCEPTION 'CASH_OPENING_BALANCE is UNSET. Replace with the intended value.';
-    END IF;
-
-    RAISE NOTICE 'Opening balances confirmed: checking=%, savings=%, cash=%', chk_bal, sav_bal, csh_bal;
-END $$;
-
--- ================================================================
--- 3. Verify exactly three accounts: 1 checking, 1 savings, 1 cash, no extras
+-- 2. Verify exactly three accounts: 1 checking, 1 savings, 1 cash, no extras
 -- ================================================================
 DO $$
 DECLARE

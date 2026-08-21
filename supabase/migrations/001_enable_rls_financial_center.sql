@@ -72,6 +72,10 @@ BEGIN
   END IF;
 END $$;
 
+-- Allow NULL opening_balance: "balance not yet established" state
+-- NULL means the first import must provide a statement balance to calculate opening.
+ALTER TABLE IF EXISTS accounts ALTER COLUMN opening_balance DROP NOT NULL;
+
 CREATE INDEX IF NOT EXISTS idx_trans_account_date ON transactions(account_id, date);
 CREATE INDEX IF NOT EXISTS idx_trans_category ON transactions(category_id, subcategory_id);
 CREATE INDEX IF NOT EXISTS idx_trans_review ON transactions(review_status);
@@ -248,7 +252,8 @@ DROP FUNCTION IF EXISTS fc_create_policy(text, text, text);
 CREATE OR REPLACE FUNCTION fc_import_transactions(
   p_account_id  bigint,
   p_filename    text,
-  p_transactions jsonb
+  p_transactions jsonb,
+  p_statement_balance numeric DEFAULT NULL
 ) RETURNS jsonb
 LANGUAGE plpgsql
 SECURITY INVOKER
@@ -266,7 +271,9 @@ DECLARE
   v_review_stat  text;
   v_category_id  bigint;
   v_subcategory_id bigint;
-  v_account_exists boolean;
+  v_imported_net numeric := 0;
+  v_opening      numeric;
+  v_opening_was_null boolean := false;
   result         jsonb;
 BEGIN
   v_total_rows := jsonb_array_length(p_transactions);
@@ -277,7 +284,8 @@ BEGIN
       'import_id', null,
       'imported_count', 0,
       'duplicate_count', 0,
-      'review_required_count', 0
+      'review_required_count', 0,
+      'opening_established', false
     );
   END IF;
 
@@ -347,6 +355,7 @@ BEGIN
 
     IF v_inserted_id IS NOT NULL THEN
       v_imported := v_imported + 1;
+      v_imported_net := v_imported_net + (v_row ->> 'amount')::numeric;
       IF v_review_stat = 'pending_review' THEN
         v_review := v_review + 1;
       END IF;
@@ -355,7 +364,18 @@ BEGIN
     END IF;
   END LOOP;
 
-  -- 5. Update import history with final counts
+  -- 5. Establish opening balance from statement balance on first import
+  SELECT opening_balance INTO v_opening FROM accounts WHERE id = p_account_id;
+  v_opening_was_null := v_opening IS NULL;
+  IF v_opening_was_null AND v_imported > 0 THEN
+    IF p_statement_balance IS NULL THEN
+      RAISE EXCEPTION 'First import for this account: statement_balance is required to establish the opening balance. Provide the statement ending balance as of the last transaction date.';
+    END IF;
+    v_opening := p_statement_balance - v_imported_net;
+    UPDATE accounts SET opening_balance = v_opening WHERE id = p_account_id;
+  END IF;
+
+  -- 6. Update import history with final counts
   UPDATE import_history
   SET new_count = v_imported,
       duplicate_count = v_duplicates,
@@ -363,7 +383,7 @@ BEGIN
       status = 'completed'
   WHERE id = v_hist_id;
 
-  -- 6. Recalculate account balance
+  -- 7. Recalculate account balance
   UPDATE accounts
   SET current_balance = (
     SELECT COALESCE(opening_balance, 0) + COALESCE(
@@ -380,6 +400,10 @@ BEGIN
     'duplicate_count', v_duplicates,
     'review_required_count', v_review
   );
+  result := result || jsonb_build_object(
+    'opening_established', (v_opening_was_null AND v_imported > 0),
+    'established_opening_balance', (SELECT opening_balance FROM accounts WHERE id = p_account_id)
+  );
 
   RETURN result;
 
@@ -390,12 +414,12 @@ END $$;
 -- Lock down the RPC: only authenticated role may execute
 DO $$
 BEGIN
-  REVOKE ALL ON FUNCTION fc_import_transactions(bigint,text,jsonb) FROM PUBLIC;
+  REVOKE ALL ON FUNCTION fc_import_transactions(bigint,text,jsonb,numeric) FROM PUBLIC;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
-    REVOKE ALL ON FUNCTION fc_import_transactions(bigint,text,jsonb) FROM anon;
+    REVOKE ALL ON FUNCTION fc_import_transactions(bigint,text,jsonb,numeric) FROM anon;
   END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
-    GRANT EXECUTE ON FUNCTION fc_import_transactions(bigint,text,jsonb) TO authenticated;
+    GRANT EXECUTE ON FUNCTION fc_import_transactions(bigint,text,jsonb,numeric) TO authenticated;
   END IF;
 END $$;
 

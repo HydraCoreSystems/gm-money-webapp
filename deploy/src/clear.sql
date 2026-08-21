@@ -19,13 +19,10 @@ END $$;
 
 DELETE FROM transactions;
 
--- Set opening balances to explicitly confirmed values
-UPDATE accounts SET opening_balance = NULLIF('{{CHECKING_OPENING_BALANCE}}', 'UNSET')::numeric WHERE type = 'checking';
-UPDATE accounts SET opening_balance = NULLIF('{{SAVINGS_OPENING_BALANCE}}',  'UNSET')::numeric WHERE type = 'savings';
-UPDATE accounts SET opening_balance = NULLIF('{{CASH_OPENING_BALANCE}}',     'UNSET')::numeric WHERE type = 'cash';
-
--- Reset current balances to opening balances
-UPDATE accounts SET current_balance = opening_balance, updated_at = now();
+-- Set opening balances to NULL: "balance not yet established"
+-- Each account's opening balance will be calculated atomically
+-- during its first PNC import (statement_balance - net of imported txns).
+UPDATE accounts SET opening_balance = NULL, current_balance = 0, updated_at = now();
 
 DO $$
 DECLARE
