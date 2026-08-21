@@ -237,7 +237,12 @@ export function normalizeDescription(raw) {
 /**
  * Determines transaction type from amount sign and description.
  */
-export function determineType(amount, description) {
+export function determineType(amount, description, signedAmountIsAuthoritative = false) {
+  // Bank formats such as PNC provide a signed amount. In those formats the
+  // bank's sign is the source of truth; description keywords must never turn
+  // a deposit into a payment (or vice versa).
+  if (signedAmountIsAuthoritative) return amount >= 0 ? 'income' : 'expense';
+
   const desc = (description || '').toLowerCase();
   const creditKeywords = /(deposit|credit|refund|payroll|transfer from|payment credit|instpmntin|shopify.*transfer)/i;
   const debitKeywords = /(purchase|card|pos|debit|plan|sub|store|fee|payment|overdraft|shopify capital)/i;

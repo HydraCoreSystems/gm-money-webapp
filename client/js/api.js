@@ -383,7 +383,7 @@ export const api = {
 
       const cleanPayee = normalizeDescription(rawPayee) || rawPayee;
       const displayPayee = formatPayee(cleanPayee);
-      const transType = determineType(rawAmount, rawPayee);
+      const transType = determineType(rawAmount, rawPayee, profile?.mode === 'single_signed');
 
       // Preserve signed amount for fingerprint: debit/refund must not collide
       let finalAmount = rawAmount;

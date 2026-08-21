@@ -173,6 +173,16 @@ assert.strictEqual(determineType(4, "ONLINE TRANSFER FROM"), "income", "online t
 assert.strictEqual(determineType(-14.71, "SHOPIFY CAPITAL"), "expense", "Shopify Capital is expense");
 assert.strictEqual(determineType(-20, "ANTHROPIC CLAUDE SUB"), "expense", "subscription is expense");
 assert.strictEqual(determineType(48.07, "VISA PAYMENT CREDIT"), "income", "payment credit is income");
+assert.strictEqual(
+  determineType(526.84, "Plant Identification Payment", true),
+  "income",
+  "PNC signed credit remains income even when its description contains payment"
+);
+assert.strictEqual(
+  determineType(-526.84, "Plant Identification Refund", true),
+  "expense",
+  "PNC signed debit remains expense even when its description contains refund"
+);
 console.log("  OK determineType correctly identifies PNC transaction types");
 
 // ============================================================
