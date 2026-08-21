@@ -1,128 +1,51 @@
-import { createClient } from 'https://esm.sh/@supabase/supabase-js@2';
-
-const SUPABASE_URL = 'https://zaqzlzofgmgvepbcjrut.supabase.co';
-const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InphcXpsem9mZ21ndmVwYmNqcnV0Iiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODQ3NjM0NzIsImV4cCI6MjEwMDMzOTQ3Mn0.MCdzf4RDAK_y7HdcCy9SrKp6vQ4dKwvyZu7o5DHfCK0';
-
-export const supabase = createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
-
-function safeFloat(val, fallback = 0) {
-  if (val === null || val === undefined || val === '') return fallback;
-  const cleaned = String(val).replace(/[\$,]/g, '').trim();
-  const n = parseFloat(cleaned);
-  return isNaN(n) ? fallback : n;
-}
-
-function extractAmount(str) {
-  if (!str) return null;
-  const raw = String(str).trim();
-  if (raw === '' || raw === '-' || raw === '$') return null;
-
-  const isAccountingNegative = /^\(.*\)$/.test(raw);
-  const isTrailingNegative = /[\d\.]+\-$/.test(raw);
-  const isLeadingNegative = raw.includes('-') || /\bDR\b/i.test(raw);
-  const isNegative = isAccountingNegative || isTrailingNegative || isLeadingNegative;
-
-  const cleaned = raw.replace(/[^\d\.]/g, '');
-  if (!cleaned || cleaned === '.') return null;
-
-  const num = parseFloat(cleaned);
-  if (isNaN(num) || num === 0) return null;
-
-  return isNegative ? -num : num;
-}
-
-function parseCSV(text) {
-  const lines = [];
-  let row = [];
-  let cell = '';
-  let inQuotes = false;
-
-  for (let i = 0; i < text.length; i++) {
-    const c = text[i];
-    const next = text[i + 1];
-
-    if (c === '"') {
-      if (inQuotes && next === '"') { cell += '"'; i++; }
-      else { inQuotes = !inQuotes; }
-    } else if (c === ',' && !inQuotes) {
-      row.push(cell.trim());
-      cell = '';
-    } else if ((c === '\r' || c === '\n') && !inQuotes) {
-      if (c === '\r' && next === '\n') i++;
-      row.push(cell.trim());
-      if (row.some(r => r.length > 0)) lines.push(row);
-      row = [];
-      cell = '';
-    } else {
-      cell += c;
-    }
-  }
-  if (cell.length > 0 || row.length > 0) {
-    row.push(cell.trim());
-    if (row.some(r => r.length > 0)) lines.push(row);
-  }
-  return lines;
-}
-
-let hasAutoHealed = false;
+import {
+  supabase,
+  safeFloat,
+  toCents,
+  fromCents,
+  extractAmount,
+  parseCSV,
+  detectCSVProfile,
+  normalizeDate,
+  normalizeDescription,
+  determineType,
+  formatPayee
+} from './services/supabaseClient.js';
+import { buildBaseKey, generateFingerprint } from './services/fingerprint.js';
 
 export const api = {
-  // 1. Accounts (with Auto-Repair)
+  // ================================================================
+  // 1. Accounts
+  // ================================================================
   async getAccounts() {
     const { data: rawData, error } = await supabase.from('accounts').select('*');
     if (error) throw error;
 
-    let accounts = rawData || [];
-    const checkingAcc = accounts.find(a => a.type === 'checking') || accounts[0];
-
-    // One-time self-healing on page load: move all transactions to Checking and zero out placeholders
-    if (!hasAutoHealed && checkingAcc) {
-      hasAutoHealed = true;
-      try {
-        await supabase.from('transactions').update({ account_id: checkingAcc.id }).neq('account_id', checkingAcc.id);
-        const { data: trans } = await supabase.from('transactions').select('amount').eq('review_status', 'approved');
-        const totalNet = (trans || []).reduce((sum, t) => sum + safeFloat(t.amount), 0);
-
-        for (const a of accounts) {
-          if (a.id === checkingAcc.id) {
-            await supabase.from('accounts').update({ opening_balance: 0.00, current_balance: totalNet, institution: 'PNC Bank' }).eq('id', a.id);
-            a.opening_balance = 0.00;
-            a.current_balance = totalNet;
-            a.institution = 'PNC Bank';
-          } else {
-            await supabase.from('accounts').update({ opening_balance: 0.00, current_balance: 0.00, institution: 'PNC Bank' }).eq('id', a.id);
-            a.opening_balance = 0.00;
-            a.current_balance = 0.00;
-            a.institution = 'PNC Bank';
-          }
-        }
-      } catch (e) {
-        console.warn('Auto-heal check:', e);
-      }
-    }
+    const accounts = rawData || [];
 
     const formatted = accounts.map(a => ({
       ...a,
-      institution: 'PNC Bank',
-      opening_balance: safeFloat(a.opening_balance),
-      current_balance: safeFloat(a.current_balance)
+      institution: a.institution || 'Bank',
+      opening_balance: a.opening_balance !== null && a.opening_balance !== undefined ? safeFloat(a.opening_balance) : null,
+      current_balance: a.current_balance !== null && a.current_balance !== undefined ? safeFloat(a.current_balance) : 0,
+      balance_established: a.opening_balance !== null && a.opening_balance !== undefined
     })).sort((a, b) => {
       if (a.type === 'checking') return -1;
       if (b.type === 'checking') return 1;
-      return a.name.localeCompare(b.name);
+      return (a.name || '').localeCompare(b.name || '');
     });
 
     return { success: true, accounts: formatted };
   },
 
   async createAccount(acc) {
-    const openBal = safeFloat(acc.opening_balance);
+    const openBal = acc.opening_balance == null ? null : safeFloat(acc.opening_balance);
     const { data, error } = await supabase.from('accounts').insert([{
       name: acc.name.trim(),
-      institution: 'PNC Bank',
+      institution: acc.institution?.trim() || 'Bank',
       type: acc.type,
       opening_balance: openBal,
-      current_balance: openBal,
+      current_balance: openBal ?? 0,
       notes: acc.notes?.trim() || null
     }]).select().single();
     if (error) throw error;
@@ -132,9 +55,9 @@ export const api = {
   async updateAccount(id, acc) {
     const { error } = await supabase.from('accounts').update({
       name: acc.name?.trim(),
-      institution: 'PNC Bank',
+      institution: acc.institution?.trim() || 'Bank',
       type: acc.type,
-      opening_balance: safeFloat(acc.opening_balance),
+      opening_balance: acc.opening_balance == null ? null : safeFloat(acc.opening_balance),
       notes: acc.notes?.trim() || null,
       active: acc.active ? true : false,
       updated_at: new Date().toISOString()
@@ -150,7 +73,9 @@ export const api = {
     return { success: true };
   },
 
+  // ================================================================
   // 2. Categories & Subcategories
+  // ================================================================
   async getCategories() {
     const { data: categories, error: catErr } = await supabase.from('categories').select('*').order('sort_order').order('name');
     if (catErr) throw catErr;
@@ -203,7 +128,9 @@ export const api = {
     return { success: true };
   },
 
+  // ================================================================
   // 3. Transactions & Register
+  // ================================================================
   async getTransactions(params = {}) {
     const [accRes, catRes, transRes] = await Promise.all([
       this.getAccounts(),
@@ -234,6 +161,21 @@ export const api = {
       list = list.filter(t => (t.payee || '').toLowerCase().includes(s) || (t.memo || '').toLowerCase().includes(s));
     }
 
+    // Compute running balances if single account view
+    let runningMap = {};
+    if (params.account_id) {
+      const accId = parseInt(params.account_id, 10);
+      const acc = accMap[accId];
+      if (acc) {
+        const sorted = [...list].sort((a, b) => a.date.localeCompare(b.date) || a.id - b.id);
+        let running = safeFloat(acc.opening_balance);
+        sorted.forEach(t => {
+          running += safeFloat(t.amount);
+          runningMap[t.id] = Math.round(running * 100) / 100;
+        });
+      }
+    }
+
     const formatted = list.map(t => ({
       ...t,
       amount: safeFloat(t.amount),
@@ -245,7 +187,7 @@ export const api = {
       attachments: [],
       has_splits: false,
       has_attachments: false,
-      running_balance: null
+      running_balance: runningMap[t.id] !== undefined ? runningMap[t.id] : null
     }));
 
     return { success: true, count: formatted.length, transactions: formatted };
@@ -320,6 +262,7 @@ export const api = {
   },
 
   async batchUpdateTransactions({ action, transaction_ids, category_id, subcategory_id, cleared_status }) {
+    if (!transaction_ids || transaction_ids.length === 0) return { success: true };
     if (action === 'set_category') {
       await supabase.from('transactions').update({
         category_id: category_id ? parseInt(category_id, 10) : null,
@@ -345,115 +288,141 @@ export const api = {
     return { success: true };
   },
 
-  // 4. Bulletproof PNC & Universal CSV Parser
+  // ================================================================
+  // 4. CSV Import: Header-based detection, fingerprint dedup, PNC support
+  // ================================================================
   async previewCSV(csvContent, accountId) {
-    const allLines = parseCSV(csvContent);
-    if (allLines.length < 1) throw new Error('CSV file is empty');
+    const allRows = parseCSV(csvContent);
+    if (allRows.length === 0) throw new Error('CSV file is empty');
 
+    const headers = allRows[0];
+    const dataRows = allRows.slice(1);
+
+    const profile = detectCSVProfile(headers);
+
+    // Build header index map
+    let hdrMap = null;
+    if (profile) {
+      hdrMap = {};
+      headers.forEach((h, idx) => { hdrMap[h.trim()] = idx; });
+    }
+
+    const getVal = (row, colName) => {
+      if (!hdrMap || !colName || hdrMap[colName] === undefined) return '';
+      return (row[hdrMap[colName]] || '').trim();
+    };
+
+    // Get merchant rules for auto-suggest
     const { rules } = await this.getMerchantRules();
-    let existingTrans = [];
+
+    // Get existing fingerprints for deduplication
+    let existingFingerprints = new Set();
     if (accountId) {
-      const { data } = await supabase.from('transactions').select('date, amount, payee, original_description').eq('account_id', accountId).neq('amount', 0);
-      existingTrans = data || [];
+      const { data: existing } = await supabase.from('transactions')
+        .select('fingerprint')
+        .eq('account_id', parseInt(accountId, 10))
+        .not('fingerprint', 'is', null);
+      (existing || []).forEach(t => { if (t.fingerprint) existingFingerprints.add(t.fingerprint); });
     }
 
     const parsed = [];
     let dupCount = 0;
 
-    allLines.forEach(row => {
-      if (!row || row.length < 2) return;
+    // Occurrence counters per base key within this CSV
+    // baseKey = accountId|date|signedAmount|normalizedPayee
+    const csvOccurrence = {};
 
-      let formattedDate = null;
-      let dateColIdx = -1;
+    for (let rIdx = 0; rIdx < dataRows.length; rIdx++) {
+      const row = dataRows[rIdx];
+      if (!row || row.length === 0 || row.every(c => !c || !c.trim())) continue;
 
-      for (let i = 0; i < row.length; i++) {
-        const cell = row[i];
-        const match = cell.match(/^(\d{1,4})[\/\-\.](\d{1,2})[\/\-](\d{1,4})$/);
-        if (match) {
-          dateColIdx = i;
-          if (match[1].length === 4) {
-            formattedDate = `${match[1]}-${match[2].padStart(2, '0')}-${match[3].padStart(2, '0')}`;
-          } else {
-            formattedDate = `${match[3].length === 2 ? '20' + match[3] : match[3]}-${match[1].padStart(2, '0')}-${match[2].padStart(2, '0')}`;
-          }
-          break;
+      let isoDate = null;
+      let rawPayee = '';
+      let rawAmount = 0;
+
+      if (profile) {
+        const rawDate = getVal(row, profile.dateCol);
+        isoDate = normalizeDate(rawDate);
+        if (!isoDate) continue;
+
+        rawPayee = (profile.payeeCol ? getVal(row, profile.payeeCol) : headers[1]) || row[1] || '';
+        rawAmount = extractAmount(getVal(row, profile.amountCol)) || 0;
+        if (rawAmount === 0 && profile.amountCol) {
+          const raw = getVal(row, profile.amountCol);
+          const num = parseFloat(raw.replace(/[^\d\.\-+]/g, ''));
+          if (!isNaN(num)) rawAmount = Math.round(num * 100) / 100;
         }
-      }
-
-      if (!formattedDate) return;
-
-      let rawDesc = '';
-      let descColIdx = -1;
-
-      for (let i = 0; i < row.length; i++) {
-        if (i === dateColIdx) continue;
-        const cell = row[i];
-        if (/[a-zA-Z]/.test(cell) && cell.length > rawDesc.length) {
-          rawDesc = cell;
-          descColIdx = i;
-        }
-      }
-      if (!rawDesc) rawDesc = 'Bank Transaction';
-
-      const foundNumbers = [];
-      for (let i = 0; i < row.length; i++) {
-        if (i === dateColIdx || i === descColIdx) continue;
-        const num = extractAmount(row[i]);
-        if (num !== null) {
-          foundNumbers.push({ col: i, val: num });
-        }
-      }
-
-      let finalAmount = 0;
-      let transType = 'expense';
-
-      if (foundNumbers.length === 1) {
-        finalAmount = foundNumbers[0].val;
-      } else if (foundNumbers.length >= 2) {
-        finalAmount = foundNumbers[0].val;
-      }
-
-      const descLower = rawDesc.toLowerCase();
-      const isPurchase = /(purchase|card|pos|debit|plan|sub|store|fee|payment)/i.test(descLower);
-      const isCredit = /(deposit|credit|refund|payroll|transfer from)/i.test(descLower);
-
-      if (isPurchase && !isCredit && finalAmount > 0) {
-        finalAmount = -finalAmount;
-        transType = 'expense';
-      } else if (isCredit && finalAmount < 0) {
-        finalAmount = Math.abs(finalAmount);
-        transType = 'income';
       } else {
-        transType = finalAmount >= 0 ? 'income' : 'expense';
+        let dateIdx = -1;
+        for (let i = 0; i < row.length; i++) {
+          const d = normalizeDate(row[i]);
+          if (d) { isoDate = d; dateIdx = i; break; }
+        }
+        if (!isoDate) continue;
+
+        let descIdx = -1;
+        for (let i = 0; i < row.length; i++) {
+          if (i === dateIdx) continue;
+          if (/[a-zA-Z]/.test(row[i]) && row[i].length > rawPayee.length) {
+            rawPayee = row[i];
+            descIdx = i;
+          }
+        }
+        if (!rawPayee) rawPayee = 'Bank Transaction';
+
+        const foundNums = [];
+        for (let i = 0; i < row.length; i++) {
+          if (i === dateIdx || i === descIdx) continue;
+          const num = extractAmount(row[i]);
+          if (num !== null) foundNums.push(num);
+        }
+        rawAmount = foundNums.length > 0 ? foundNums[0] : 0;
       }
 
-      const cleanPayee = rawDesc.replace(/(#\d+|store\s*\d+|pos\s*debit|purchase\s*authorized\s*on\s*[\d\/]+|card\d+|xxxxxxxxxxxx\d+)/gi, '').trim() || rawDesc;
+      if (rawAmount === 0 && !rawPayee) continue;
+
+      const cleanPayee = normalizeDescription(rawPayee) || rawPayee;
+      const displayPayee = formatPayee(cleanPayee);
+      const transType = determineType(rawAmount, rawPayee);
+
+      // Preserve signed amount for fingerprint: debit/refund must not collide
+      let finalAmount = rawAmount;
+      if (transType === 'expense' && finalAmount > 0) finalAmount = -finalAmount;
+      if (transType === 'income' && finalAmount < 0) finalAmount = Math.abs(finalAmount);
+
+      // Merchant memory match
       const upper = cleanPayee.toUpperCase();
       const match = (rules || []).find(r => upper.includes((r.match_pattern || '').toUpperCase()));
 
-      const isDuplicate = existingTrans.some(e =>
-        e.date === formattedDate &&
-        Math.abs(safeFloat(e.amount)) === Math.abs(finalAmount) &&
-        (String(e.original_description || '').toLowerCase() === rawDesc.toLowerCase() || String(e.payee || '').toLowerCase() === cleanPayee.toLowerCase())
-      );
+      // Occurrence-based deduplication:
+      // baseKey includes signed amount → debit (-$27.95) and refund (+$27.95) get different keys
+      // Two identical purchases get occurrence 1 and 2 → distinct fingerprints
+      const baseKey = buildBaseKey(accountId, isoDate, finalAmount, cleanPayee);
+      csvOccurrence[baseKey] = (csvOccurrence[baseKey] || 0) + 1;
+      const occ = csvOccurrence[baseKey];
 
+      const fingerprint = await generateFingerprint(accountId, isoDate, finalAmount, cleanPayee, occ);
+
+      const isDuplicate = existingFingerprints.has(fingerprint);
       if (isDuplicate) dupCount++;
 
       parsed.push({
-        date: formattedDate,
-        original_description: rawDesc,
-        payee: match ? match.display_payee : cleanPayee,
+        row_index: rIdx + 1,
+        date: isoDate,
+        original_description: rawPayee,
+        payee: match ? match.display_payee : displayPayee,
         amount: finalAmount,
         transaction_type: transType,
-        category_id: match ? match.category_id : null,
+        suggested_category_id: match ? match.category_id : null,
+        suggested_subcategory_id: match ? match.subcategory_id : null,
         category_name: null,
-        subcategory_id: match ? match.subcategory_id : null,
         subcategory_name: null,
-        confidence: match ? (safeFloat(match.confidence) || 1.0) : 0,
+        confidence: match ? safeFloat(match.confidence || 1.0) : 0,
         is_duplicate: isDuplicate,
-        duplicate_reason: isDuplicate ? 'Matches existing date & amount in account' : null
+        duplicate_reason: isDuplicate ? 'Identical transaction (date + signed amount + payee + occurrence) already exists in account' : null,
+        fingerprint
       });
-    });
+    }
 
     return {
       success: true,
@@ -461,66 +430,109 @@ export const api = {
         total_rows: parsed.length,
         new_count: parsed.length - dupCount,
         duplicate_count: dupCount,
-        profile: { name: 'PNC Bank CSV', institution: 'PNC Bank' },
-        profile_name: 'PNC Bank CSV',
+        error_count: 0,
+        profile: profile || { name: 'Generic CSV', institution: 'Unknown' },
+        profile_name: profile ? profile.name : 'Generic CSV',
         transactions: parsed
       }
     };
   },
 
-  async processImport({ accountId, transactions }) {
-    let accId = parseInt(accountId, 10);
+  async processImport({ filename, accountId, account_id, transactions, statementBalance }) {
+    const accId = parseInt(accountId || account_id, 10);
     if (isNaN(accId)) {
-      const { data: accs } = await supabase.from('accounts').select('id').eq('type', 'checking').limit(1);
-      if (accs && accs[0]) accId = accs[0].id;
-      else {
-        const { data: anyAcc } = await supabase.from('accounts').select('id').limit(1);
-        if (anyAcc && anyAcc[0]) accId = anyAcc[0].id;
-        else throw new Error('Please create at least one account under Accounts before importing');
-      }
+      throw new Error('Destination account ID is required for import');
     }
-
-    await supabase.from('transactions').delete().eq('amount', 0);
 
     const nonDups = (transactions || []).filter(t => !t.is_duplicate);
 
     if (nonDups.length === 0) {
-      return { success: true, imported_count: 0, duplicate_count: transactions.length, pending_review_count: 0 };
+      return { success: true, imported_count: 0, duplicate_count: (transactions || []).length, review_required_count: 0 };
     }
 
-    const rows = nonDups.map(t => ({
-      account_id: accId,
-      date: t.date || new Date().toISOString().slice(0, 10),
-      payee: t.payee || 'Bank Transaction',
-      original_description: t.original_description || t.payee,
-      amount: safeFloat(t.amount),
-      transaction_type: t.transaction_type || (safeFloat(t.amount) >= 0 ? 'income' : 'expense'),
-      category_id: t.category_id ? parseInt(t.category_id, 10) : null,
-      subcategory_id: t.subcategory_id ? parseInt(t.subcategory_id, 10) : null,
-      review_status: 'approved',
-      cleared_status: 'uncleared'
-    }));
+    // Check if account needs balance establishment
+    const { accounts } = await this.getAccounts();
+    const account = (accounts || []).find(a => a.id === accId);
+    const needsOpening = account && account.opening_balance == null;
 
-    const { error } = await supabase.from('transactions').insert(rows);
-    if (error) throw error;
+    const payloadRows = nonDups.map(t => {
+      const highConf = (t.confidence ?? 0) >= 0.7;
+      const hasSuggestion = t.suggested_category_id != null;
 
-    await this.recalculateBalance(accId);
+      return {
+        date: t.date || new Date().toISOString().slice(0, 10),
+        payee: t.payee || 'Bank Transaction',
+        original_description: t.original_description || t.payee,
+        amount: safeFloat(t.amount),
+        transaction_type: t.transaction_type || (safeFloat(t.amount) >= 0 ? 'income' : 'expense'),
+        suggested_category_id: hasSuggestion ? parseInt(t.suggested_category_id, 10) : null,
+        suggested_subcategory_id: t.suggested_subcategory_id ? parseInt(t.suggested_subcategory_id, 10) : null,
+        confidence: safeFloat(t.confidence ?? 0),
+        fingerprint: t.fingerprint || null,
+        meta: { highConf, hasSuggestion }
+      };
+    });
+
+    const approveCount = payloadRows.filter(r => r.meta.highConf && r.meta.hasSuggestion).length;
+    const reviewCount = payloadRows.length - approveCount;
+
+    // Build RPC parameters
+    const rpcParams = {
+      p_account_id: accId,
+      p_filename: filename || 'manual_import.csv',
+      p_transactions: payloadRows
+    };
+
+    // If balance not yet established, require statement_balance
+    if (needsOpening) {
+      if (statementBalance == null) {
+        throw new Error('First import for this account requires a statement balance. Please provide the statement ending balance on the last transaction date.');
+      }
+      rpcParams.p_statement_balance = safeFloat(statementBalance);
+    }
+
+    const { data: result, error: rpcError } = await supabase.rpc('fc_import_transactions', rpcParams);
+
+    if (rpcError) {
+      throw new Error('Import failed: ' + rpcError.message);
+    }
+
+    if (!result || !result.success) {
+      throw new Error('Import RPC returned without success');
+    }
+
     return {
       success: true,
-      imported_count: rows.length,
-      duplicate_count: transactions.length - rows.length,
-      pending_review_count: 0
+      import_id: result.import_id,
+      imported_count: result.imported_count,
+      duplicate_count: result.duplicate_count,
+      review_required_count: result.review_required_count,
+      opening_established: result.opening_established || false,
+      classified: { approved: approveCount, review: reviewCount }
     };
   },
 
-  async getImportProfiles() { return { success: true, profiles: [] }; },
-  async getImportHistory() { return { success: true, history: [] }; },
+  async getImportProfiles() {
+    const { data, error } = await supabase.from('import_profiles').select('*').order('name');
+    if (error) return { success: true, profiles: [] };
+    return { success: true, profiles: data || [] };
+  },
 
-  // 5. Attachments
+  async getImportHistory() {
+    const { data, error } = await supabase.from('import_history').select('*, accounts(name)').order('import_date', { ascending: false }).limit(20);
+    if (error) return { success: true, history: [] };
+    return { success: true, history: data || [] };
+  },
+
+  // ================================================================
+  // 5. Attachments (stubs)
+  // ================================================================
   async uploadAttachment() { return { success: true }; },
   async deleteAttachment() { return { success: true }; },
 
+  // ================================================================
   // 6. Merchant Memory
+  // ================================================================
   async getMerchantRules() {
     const { data, error } = await supabase.from('merchant_memory').select('*').order('times_seen', { ascending: false });
     if (error) throw error;
@@ -561,9 +573,32 @@ export const api = {
     };
   },
 
-  async reprocessMerchantMemory() { return { success: true, updated_count: 0 }; },
+  async reprocessMerchantMemory() {
+    const { data: pending } = await supabase.from('transactions').select('id, original_description, payee').eq('review_status', 'pending_review');
+    if (!pending || pending.length === 0) return { success: true, updated_count: 0 };
 
+    const { rules } = await this.getMerchantRules();
+    let updated = 0;
+
+    for (const t of pending) {
+      const upper = (t.original_description || t.payee || '').toUpperCase();
+      const match = (rules || []).find(r => upper.includes((r.match_pattern || '').toUpperCase()));
+      if (match && match.category_id) {
+        await supabase.from('transactions').update({
+          category_id: match.category_id,
+          subcategory_id: match.subcategory_id || null,
+          payee: match.display_payee || t.payee
+        }).eq('id', t.id);
+        updated++;
+      }
+    }
+
+    return { success: true, updated_count: updated };
+  },
+
+  // ================================================================
   // 7. Scheduled Bills & Projections
+  // ================================================================
   async getScheduled() {
     const [accRes, catRes, schRes] = await Promise.all([
       this.getAccounts(),
@@ -621,7 +656,7 @@ export const api = {
   async recordScheduled(id, date) {
     const { data: sch } = await supabase.from('scheduled_transactions').select('*').eq('id', id).single();
     if (!sch) throw new Error('Scheduled item not found');
-    await this.createTransaction({
+    const result = await this.createTransaction({
       account_id: sch.account_id,
       date: date || new Date().toISOString().slice(0, 10),
       payee: sch.payee,
@@ -631,7 +666,7 @@ export const api = {
       subcategory_id: sch.subcategory_id,
       memo: `[Auto] ${sch.memo || ''}`
     });
-    return { success: true };
+    return { success: true, transaction_id: result.transaction_id };
   },
 
   async getProjection(days = 30) {
@@ -672,7 +707,7 @@ export const api = {
     return {
       success: true,
       projection: {
-        days: days,
+        days,
         current_cash: liquidCash,
         projected_cash: projectedCash,
         total_income: totalIncome,
@@ -680,12 +715,14 @@ export const api = {
         net_change: netChange,
         start_date: now.toISOString().slice(0, 10),
         end_date: targetDate.toISOString().slice(0, 10),
-        events: events
+        events
       }
     };
   },
 
+  // ================================================================
   // 8. Reports & Dashboard
+  // ================================================================
   async getDashboardSummary() {
     const [accRes, catRes, transRes] = await Promise.all([
       this.getAccounts(),
@@ -711,21 +748,30 @@ export const api = {
 
     const now = new Date();
     const currentMonth = now.toISOString().slice(0, 7);
+    const currentYear = now.toISOString().slice(0, 4);
     const transactions = transRes.data || [];
 
     let mtdIncome = 0;
     let mtdExpense = 0;
+    let ytdIncome = 0;
+    let ytdExpense = 0;
     const catSpendingMap = {};
 
     transactions.forEach(t => {
       const amt = safeFloat(t.amount);
-      if (t.date && t.date.startsWith(currentMonth)) {
-        if (amt > 0 && t.transaction_type === 'income') mtdIncome += amt;
-        if (amt < 0 && t.transaction_type === 'expense') {
-          const abs = Math.abs(amt);
-          mtdExpense += abs;
-          const catName = catMap[t.category_id] || 'Uncategorized';
-          catSpendingMap[catName] = (catSpendingMap[catName] || 0) + abs;
+      if (t.date) {
+        if (t.date.startsWith(currentMonth)) {
+          if (amt > 0 && (t.transaction_type === 'income' || t.transaction_type === 'transfer')) mtdIncome += amt;
+          if (amt < 0 && t.transaction_type === 'expense') {
+            const abs = Math.abs(amt);
+            mtdExpense += abs;
+            const catName = catMap[t.category_id] || 'Uncategorized';
+            catSpendingMap[catName] = (catSpendingMap[catName] || 0) + abs;
+          }
+        }
+        if (t.date.startsWith(currentYear)) {
+          if (amt > 0 && (t.transaction_type === 'income' || t.transaction_type === 'transfer')) ytdIncome += amt;
+          if (amt < 0 && t.transaction_type === 'expense') ytdExpense += Math.abs(amt);
         }
       }
     });
@@ -740,6 +786,8 @@ export const api = {
       })).sort((a, b) => b.total_amount - a.total_amount)
     };
 
+    const pendingCount = (await supabase.from('transactions').select('id', { count: 'exact', head: true }).eq('review_status', 'pending_review')).count || 0;
+
     return {
       success: true,
       summary: {
@@ -750,12 +798,12 @@ export const api = {
         mtd_income: mtdIncome,
         mtd_expense: mtdExpense,
         mtd_net: mtdIncome - mtdExpense,
-        ytd_income: mtdIncome,
-        ytd_expense: mtdExpense,
-        ytd_net: mtdIncome - mtdExpense,
-        pending_review_count: 0,
+        ytd_income: ytdIncome,
+        ytd_expense: ytdExpense,
+        ytd_net: ytdIncome - ytdExpense,
+        pending_review_count: pendingCount,
         upcoming_bills_count: 0,
-        accounts: accounts,
+        accounts,
         recent_transactions: transactions.slice(0, 8).map(t => ({
           ...t,
           amount: safeFloat(t.amount),
@@ -771,56 +819,155 @@ export const api = {
     };
   },
 
-  async getSpendingByCategory() {
-    const summary = await this.getDashboardSummary();
-    return { success: true, ...summary.summary.category_spending };
+  async getSpendingByCategory(startDate, endDate, accountId) {
+    const { data: trans } = await supabase.from('transactions').select('*').eq('review_status', 'approved').eq('transaction_type', 'expense');
+
+    let filtered = trans || [];
+    if (startDate) filtered = filtered.filter(t => t.date >= startDate);
+    if (endDate) filtered = filtered.filter(t => t.date <= endDate);
+    if (accountId) filtered = filtered.filter(t => String(t.account_id) === String(accountId));
+
+    const { categories: cats } = await this.getCategories();
+    const catMap = {};
+    (cats || []).forEach(c => { catMap[c.id] = c.name; });
+
+    const spendingMap = {};
+    let grandTotal = 0;
+
+    filtered.forEach(t => {
+      const abs = Math.abs(safeFloat(t.amount));
+      grandTotal += abs;
+      const catName = catMap[t.category_id] || 'Uncategorized';
+      spendingMap[catName] = (spendingMap[catName] || 0) + abs;
+    });
+
+    const categories = Object.entries(spendingMap).map(([name, total]) => ({
+      category_name: name,
+      total_amount: Math.round(total * 100) / 100,
+      percentage: grandTotal > 0 ? Number(((total / grandTotal) * 100).toFixed(1)) : 0,
+      subcategories: []
+    })).sort((a, b) => b.total_amount - a.total_amount);
+
+    return { success: true, grand_total: Math.round(grandTotal * 100) / 100, categories };
   },
 
-  async getProfitLoss() {
-    const summary = await this.getDashboardSummary();
-    const now = new Date();
-    return {
-      success: true,
-      start_date: `${now.getFullYear()}-01-01`,
-      end_date: now.toISOString().slice(0, 10),
-      income: {
-        total: summary.summary.mtd_income,
-        categories: [{ category_name: 'Total Income', total: summary.summary.mtd_income, subcategories: [] }]
-      },
-      expenses: {
-        total: summary.summary.mtd_expense,
-        categories: summary.summary.category_spending.categories
-      },
-      net_operating_income: summary.summary.mtd_net
-    };
-  },
-
-  async getCashFlowTrend() {
-    const summary = await this.getDashboardSummary();
-    return { success: true, trend: summary.summary.cash_flow_trend };
-  },
-
-  async getPayeeSpending() {
+  async getProfitLoss(startDate, endDate, accountId) {
     const { data: trans } = await supabase.from('transactions').select('*').eq('review_status', 'approved');
-    const payeeMap = {};
-    (trans || []).forEach(t => {
+
+    let filtered = trans || [];
+    if (startDate) filtered = filtered.filter(t => t.date >= startDate);
+    if (endDate) filtered = filtered.filter(t => t.date <= endDate);
+    if (accountId) filtered = filtered.filter(t => String(t.account_id) === String(accountId));
+
+    const { categories: cats } = await this.getCategories();
+    const catMap = {};
+    (cats || []).forEach(c => { catMap[c.id] = c.name; });
+
+    let totalIncome = 0;
+    let totalExpenses = 0;
+    const incomeMap = {};
+    const expenseMap = {};
+
+    filtered.forEach(t => {
       const amt = safeFloat(t.amount);
-      if (amt < 0) {
+      if (amt > 0 && (t.transaction_type === 'income' || t.transaction_type === 'transfer')) {
+        totalIncome += amt;
+        const cat = catMap[t.category_id] || 'Other Income';
+        incomeMap[cat] = (incomeMap[cat] || 0) + amt;
+      }
+      if (amt < 0 && t.transaction_type === 'expense') {
         const abs = Math.abs(amt);
-        const p = t.payee || 'Unknown';
-        if (!payeeMap[p]) {
-          payeeMap[p] = { payee: p, total_spent: 0, transaction_count: 0, last_transaction_date: t.date, primary_category: 'Expense' };
-        }
-        payeeMap[p].total_spent += abs;
-        payeeMap[p].transaction_count++;
+        totalExpenses += abs;
+        const cat = catMap[t.category_id] || 'Uncategorized Expense';
+        expenseMap[cat] = (expenseMap[cat] || 0) + abs;
       }
     });
 
-    const payees = Object.values(payeeMap).sort((a, b) => b.total_spent - a.total_spent);
+    const incomeCategories = Object.entries(incomeMap).map(([name, total]) => ({
+      category_name: name,
+      total: Math.round(total * 100) / 100,
+      subcategories: []
+    })).sort((a, b) => b.total - a.total);
+
+    const expenseCategories = Object.entries(expenseMap).map(([name, total]) => ({
+      category_name: name,
+      total: Math.round(total * 100) / 100,
+      subcategories: []
+    })).sort((a, b) => b.total - a.total);
+
+    return {
+      success: true,
+      start_date: startDate || 'All Time',
+      end_date: endDate || new Date().toISOString().slice(0, 10),
+      income: { categories: incomeCategories, total: Math.round(totalIncome * 100) / 100 },
+      expenses: { categories: expenseCategories, total: Math.round(totalExpenses * 100) / 100 },
+      net_operating_income: Math.round((totalIncome - totalExpenses) * 100) / 100
+    };
+  },
+
+  async getCashFlowTrend(months = 12) {
+    const { data: trans } = await supabase.from('transactions').select('date, amount, transaction_type').eq('review_status', 'approved');
+
+    const results = [];
+    const today = new Date();
+
+    for (let i = months - 1; i >= 0; i--) {
+      const d = new Date(today.getFullYear(), today.getMonth() - i, 1);
+      const monthStr = d.toISOString().slice(0, 7);
+      const label = d.toLocaleString('default', { month: 'short', year: 'numeric' });
+
+      let income = 0;
+      let expense = 0;
+
+      (trans || []).forEach(t => {
+        if (t.date && t.date.startsWith(monthStr)) {
+          const amt = safeFloat(t.amount);
+          if (amt > 0 && t.transaction_type === 'income') income += amt;
+          if (amt < 0 && t.transaction_type === 'expense') expense += Math.abs(amt);
+        }
+      });
+
+      results.push({
+        month: monthStr,
+        label,
+        income: Math.round(income * 100) / 100,
+        expense: Math.round(expense * 100) / 100,
+        net: Math.round((income - expense) * 100) / 100
+      });
+    }
+
+    return { success: true, trend: results };
+  },
+
+  async getPayeeSpending(startDate, endDate) {
+    const { data: trans } = await supabase.from('transactions').select('*').eq('review_status', 'approved').eq('transaction_type', 'expense');
+
+    let filtered = trans || [];
+    if (startDate) filtered = filtered.filter(t => t.date >= startDate);
+    if (endDate) filtered = filtered.filter(t => t.date <= endDate);
+
+    const payeeMap = {};
+    filtered.forEach(t => {
+      const abs = Math.abs(safeFloat(t.amount));
+      const p = t.payee || 'Unknown';
+      if (!payeeMap[p]) {
+        payeeMap[p] = { payee: p, total_spent: 0, transaction_count: 0, last_transaction_date: t.date, primary_category: 'Expense' };
+      }
+      payeeMap[p].total_spent += abs;
+      payeeMap[p].transaction_count++;
+    });
+
+    const payees = Object.values(payeeMap).map(p => ({
+      ...p,
+      total_spent: Math.round(p.total_spent * 100) / 100
+    })).sort((a, b) => b.total_spent - a.total_spent);
+
     return { success: true, payees };
   },
 
+  // ================================================================
   // 9. Reconciliation
+  // ================================================================
   async startReconciliation({ account_id, statement_date, statement_balance }) {
     const { data: acc } = await supabase.from('accounts').select('*').eq('id', account_id).single();
     const { data: trans } = await supabase.from('transactions').select('*').eq('account_id', account_id).lte('date', statement_date);
@@ -860,7 +1007,9 @@ export const api = {
     return { success: true };
   },
 
+  // ================================================================
   // 10. Backups & Reset
+  // ================================================================
   async listBackups() { return { success: true, backups: [] }; },
 
   async createBackupSnapshot() {
@@ -902,9 +1051,14 @@ export const api = {
   async recalculateBalance(accountId) {
     const { data: acc } = await supabase.from('accounts').select('opening_balance').eq('id', accountId).single();
     if (!acc) return;
-    const { data: trans } = await supabase.from('transactions').select('amount').eq('account_id', accountId).eq('review_status', 'approved');
-    const transSum = (trans || []).reduce((sum, t) => sum + safeFloat(t.amount), 0);
-    const newBal = safeFloat(acc.opening_balance) + transSum;
+    const { data: trans } = await supabase.from('transactions').select('amount').eq('account_id', accountId);
+    const transCents = (trans || []).reduce((sum, t) => sum + toCents(t.amount), 0);
+    if (acc.opening_balance == null) {
+      await supabase.from('accounts').update({ current_balance: 0 }).eq('id', accountId);
+      return;
+    }
+    const openCents = toCents(acc.opening_balance);
+    const newBal = (openCents + transCents) / 100;
     await supabase.from('accounts').update({ current_balance: newBal }).eq('id', accountId);
   },
 
@@ -914,7 +1068,7 @@ export const api = {
     await supabase.from('transactions').delete().neq('id', 0);
     const { data: accs } = await supabase.from('accounts').select('*');
     for (const a of (accs || [])) {
-      await supabase.from('accounts').update({ current_balance: safeFloat(a.opening_balance) }).eq('id', a.id);
+      await supabase.from('accounts').update({ current_balance: a.opening_balance == null ? 0 : safeFloat(a.opening_balance) }).eq('id', a.id);
     }
     return { success: true };
   }

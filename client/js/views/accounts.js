@@ -41,10 +41,10 @@ export async function renderAccounts(container, navigateTo) {
               <div style="margin: 16px 0;">
                 <div style="font-size: 11px; color: var(--text-dim); text-transform: uppercase;">Current Balance</div>
                 <div class="text-mono" style="font-size: 22px; font-weight: 700; color: ${a.type === 'credit_card' && a.current_balance > 0 ? '#fca5a5' : 'var(--text-main)'};">
-                  $${a.current_balance.toFixed(2)}
+                  ${a.balance_established ? `$${a.current_balance.toFixed(2)}` : 'Not established'}
                 </div>
                 <div style="font-size: 11.5px; color: var(--text-dim); margin-top: 2px;">
-                  Opening Balance: $${a.opening_balance.toFixed(2)}
+                  Opening Balance: ${a.balance_established ? `$${a.opening_balance.toFixed(2)}` : 'Not established'}
                 </div>
               </div>
 

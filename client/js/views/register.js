@@ -51,7 +51,7 @@ export async function renderRegister(container, initialAccountId = null, navigat
                 <option value="" ${!currentAccountId ? 'selected' : ''}>All Accounts Combined</option>
                 ${accounts.map(a => `
                   <option value="${a.id}" ${a.id == currentAccountId ? 'selected' : ''}>
-                    ${a.name} ($${a.current_balance.toFixed(2)})
+                    ${a.name} (${a.balance_established ? `$${a.current_balance.toFixed(2)}` : 'Not established'})
                   </option>
                 `).join('')}
               </select>
@@ -85,11 +85,11 @@ export async function renderRegister(container, initialAccountId = null, navigat
             <div style="background-color: var(--bg-surface-raised); padding: 10px 18px; border-bottom: 1px solid var(--border-subtle); display: flex; gap: 24px; font-size: 13px; align-items: center;">
               <div>
                 <span style="color: var(--text-dim); font-size: 11px; text-transform: uppercase;">Current Balance: </span>
-                <strong class="text-mono" style="color: var(--text-main); font-size: 14px;">$${selectedAcc.current_balance.toFixed(2)}</strong>
+                <strong class="text-mono" style="color: var(--text-main); font-size: 14px;">${selectedAcc.balance_established ? `$${selectedAcc.current_balance.toFixed(2)}` : 'Not established'}</strong>
               </div>
               <div>
                 <span style="color: var(--text-dim); font-size: 11px; text-transform: uppercase;">Opening Balance: </span>
-                <span class="text-mono" style="color: var(--text-muted);">$${selectedAcc.opening_balance.toFixed(2)}</span>
+                <span class="text-mono" style="color: var(--text-muted);">${selectedAcc.balance_established ? `$${selectedAcc.opening_balance.toFixed(2)}` : 'Not established'}</span>
               </div>
               <div style="margin-left: auto; color: var(--text-dim); font-size: 12px;">
                 Showing ${transactions.length} transactions
