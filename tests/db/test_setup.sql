@@ -46,6 +46,30 @@ INSERT INTO auth.users (id, email) VALUES
 ON CONFLICT (id) DO NOTHING;
 
 -- ================================================================
+-- Create roles early (tables and grants reference them below)
+-- ================================================================
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+    CREATE ROLE authenticated;
+  END IF;
+END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    CREATE ROLE anon;
+  END IF;
+END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'fc_test_role') THEN
+    CREATE ROLE fc_test_role WITH LOGIN PASSWORD 'testpass';
+  END IF;
+END $$;
+
+GRANT authenticated TO fc_test_role;
+
+-- ================================================================
 -- Create minimal FC tables that match the production skrybix schema.
 -- These are the tables the migration expects to be present.
 -- ================================================================
@@ -180,30 +204,23 @@ INSERT INTO categories (name, type) VALUES
 ON CONFLICT DO NOTHING;
 
 -- ================================================================
--- Test role infrastructure: authenticated, anon, fc_test_role
+-- Unrelated Skrybix control table (to prove migration does not touch it)
 -- ================================================================
 
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
-    CREATE ROLE authenticated;
-  END IF;
-END $$;
+CREATE TABLE IF NOT EXISTS skrybix_control (
+  id        bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
+  label     text NOT NULL,
+  created_at timestamptz DEFAULT now()
+);
 
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
-    CREATE ROLE anon;
-  END IF;
-END $$;
+-- Give it distinctive grants that must survive the migration unchanged
+GRANT SELECT ON skrybix_control TO PUBLIC;
+GRANT INSERT, UPDATE, DELETE ON skrybix_control TO authenticated;
 
-DO $$ BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'fc_test_role') THEN
-    CREATE ROLE fc_test_role WITH LOGIN PASSWORD 'testpass';
-  END IF;
-END $$;
+-- ================================================================
+-- fc_test_role grants: schema access and broad table privileges for RLS testing
+-- ================================================================
 
-GRANT authenticated TO fc_test_role;
-
--- fc_test_role needs schema access and table privileges for RLS testing
 GRANT USAGE ON SCHEMA public TO fc_test_role;
 GRANT USAGE ON SCHEMA auth TO fc_test_role;
 GRANT SELECT ON auth.users TO fc_test_role;

@@ -132,10 +132,22 @@ else
   fail "Concurrent race test failed (exit $CEXIT)"
 fi
 
-# 9. Security audit
+# 9. Skrybix isolation test
 echo ""
 echo "================================================================"
-echo "  PHASE 8: Security Audit"
+echo "  PHASE 8: Skrybix Isolation Test"
+echo "================================================================"
+OUT=$($PSQL < "$REPO_ROOT/tests/db/test_skrybix_isolation.sql" 2>&1)
+P=$(echo "$OUT" | grep -c "PASS:" || true)
+F=$(echo "$OUT" | grep -c "FAIL:" || true)
+echo "$OUT" | grep -E "PASS|FAIL"
+pass "Skrybix isolation: $P passed"
+[ "$F" = "0" ] || fail "Skrybix isolation: $F failures"
+
+# 10. Security audit
+echo ""
+echo "================================================================"
+echo "  PHASE 9: Security Audit"
 echo "================================================================"
 OUT=$($PSQL < "$REPO_ROOT/tests/db/test_security_audit.sql" 2>&1)
 echo "$OUT"

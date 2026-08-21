@@ -436,12 +436,29 @@ BEGIN
     REVOKE ALL ON fc_members FROM PUBLIC;
   END IF;
 
-  -- Sequence usage for identity columns
-  EXECUTE 'GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO authenticated';
-  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
-    EXECUTE 'REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon';
-  END IF;
-  EXECUTE 'REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC';
+  -- Sequence usage: only FC-owned identity sequences, not every sequence in public
+  FOR tbl IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename = ANY(ARRAY[
+    'accounts','categories','subcategories','transactions','merchant_memory',
+    'scheduled_transactions','transaction_splits','transaction_attachments',
+    'reconciliations','import_history','import_profiles'
+  ])
+  LOOP
+    EXECUTE format('
+      DO $inner$
+      DECLARE
+        seq_name text;
+      BEGIN
+        SELECT pg_get_serial_sequence(''public.%I'', ''id'') INTO seq_name;
+        IF seq_name IS NOT NULL THEN
+          EXECUTE format(''GRANT USAGE ON SEQUENCE %%s TO authenticated'', seq_name);
+          IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = ''anon'') THEN
+            EXECUTE format(''REVOKE ALL ON SEQUENCE %%s FROM anon'', seq_name);
+          END IF;
+          EXECUTE format(''REVOKE ALL ON SEQUENCE %%s FROM PUBLIC'', seq_name);
+        END IF;
+      END $inner$;
+    ', tbl);
+  END LOOP;
 END $$;
 
 -- ============================================================================
