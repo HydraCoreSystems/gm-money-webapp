@@ -308,9 +308,7 @@ export const api = {
     return { success: true };
   },
 
-  // -------------------------------------------------------------
-  // 4. BULLETPROOF PNC & UNIVERSAL CSV PARSER
-  // -------------------------------------------------------------
+  // 4. Bulletproof PNC & Universal CSV Parser
   async previewCSV(csvContent, accountId) {
     const allLines = parseCSV(csvContent);
     if (allLines.length < 1) throw new Error('CSV file is empty');
@@ -346,7 +344,6 @@ export const api = {
         }
       }
 
-      // Skip non-transaction rows (like headers)
       if (!formattedDate) return;
 
       // 2. Locate Description / Payee Cell
@@ -526,6 +523,8 @@ export const api = {
       } : null
     };
   },
+
+  async reprocessMerchantMemory() { return { success: true, updated_count: 0 }; },
 
   // 7. Scheduled Bills & Projections
   async getScheduled() {
@@ -824,7 +823,47 @@ export const api = {
     return { success: true };
   },
 
-  // 10. Balance Engine & Data Reset
+  // 10. Backups, Reset & Balance Engine
+  async listBackups() {
+    return { success: true, backups: [] };
+  },
+
+  async createBackupSnapshot() {
+    const [accs, cats, subs, trans, sch, rules] = await Promise.all([
+      supabase.from('accounts').select('*'),
+      supabase.from('categories').select('*'),
+      supabase.from('subcategories').select('*'),
+      supabase.from('transactions').select('*'),
+      supabase.from('scheduled_transactions').select('*'),
+      supabase.from('merchant_memory').select('*')
+    ]);
+
+    const backupData = {
+      timestamp: new Date().toISOString(),
+      app: 'Gathering Moss Financial Center',
+      data: {
+        accounts: accs.data || [],
+        categories: cats.data || [],
+        subcategories: subs.data || [],
+        transactions: trans.data || [],
+        scheduled_transactions: sch.data || [],
+        merchant_memory: rules.data || []
+      }
+    };
+
+    const blob = new Blob([JSON.stringify(backupData, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `gathering_moss_backup_${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+
+    return { success: true, filename: a.download };
+  },
+
+  async importLegacySheets() { return { success: true, imported_count: 0 }; },
+
   async recalculateBalance(accountId) {
     const { data: acc } = await supabase.from('accounts').select('opening_balance').eq('id', accountId).single();
     if (!acc) return;
