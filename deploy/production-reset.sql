@@ -1,159 +1,217 @@
--- ============================================================================
--- Gathering Moss Financial Center — Production Reset & Deployment
--- Atomic: entire script is one transaction. Any failure rolls back everything.
--- Run in Supabase Dashboard SQL Editor.
--- 
+﻿-- ============================================================
+-- Gathering Moss Financial Center -- Production Reset & Deployment
+-- GENERATED FILE -- do not edit directly.
+-- Source: deploy/src/*.sql + supabase/migrations/001_enable_rls_financial_center.sql
+-- Regenerate: pwsh -Command "Get-Content deploy/src/preflight.sql, deploy/src/clear.sql, supabase/migrations/001_enable_rls_financial_center.sql, deploy/src/enroll.sql, deploy/src/verify.sql | Set-Content deploy/production-reset.sql"
+--
 -- Before running:
---   1. Take a JSON snapshot via the app or Dashboard export.
---   2. Confirm Phil and Crystal's auth.users UUIDs exist.
---   3. Replace <phil-uuid> and <crystal-uuid> below.
---   4. Set opening balances if they differ from current_balance (see step 7).
--- ============================================================================
+--   1. Run deploy/backup.sql to create a pre-reset backup.
+--   2. Replace all {{PLACEHOLDER}} values below.
+--   3. Review the complete script.
+--   4. Run in Supabase Dashboard SQL Editor.
+-- ============================================================
 
 BEGIN;
 
 \echo '========================================'
-\echo '  PRODUCTION RESET & DEPLOYMENT'
+\echo '  GATHERING MOSS -- PRODUCTION RESET'
 \echo '========================================'
 
--- ============================================================================
--- PHASE 1: Verify environment
--- ============================================================================
-\echo ''
-\echo '--- Phase 1: Verify environment ---'
+-- ================================================================
+-- PHASE: preflight (validates UUIDs, balances, account state)
+-- ================================================================
+-- ================================================================
+-- phase: preflight
+-- Validates environment, owner UUIDs, opening balances, account state
+-- before any destructive operation. Runs first in the transaction.
+-- ================================================================
+
+-- ================================================================
+-- 1. Validate owner UUIDs
+-- ================================================================
+DO $$
+DECLARE
+    phil_id    uuid := '{{PHIL_UUID}}'::uuid;
+    crystal_id uuid := '{{CRYSTAL_UUID}}'::uuid;
+    phil_exists    boolean;
+    crystal_exists boolean;
+BEGIN
+    -- Reject placeholder values
+    IF phil_id = '00000000-0000-0000-0000-000000000000'::uuid
+       OR crystal_id = '00000000-0000-0000-0000-000000000000'::uuid
+       OR phil_id = crystal_id
+    THEN
+        RAISE EXCEPTION 'UUID validation failed: Phil and Crystal UUIDs must be replaced with actual auth.users UUIDs. Both must be distinct. Both must not be the zero UUID.';
+    END IF;
+
+    -- Verify both exist in auth.users
+    SELECT EXISTS (SELECT 1 FROM auth.users WHERE id = phil_id) INTO phil_exists;
+    SELECT EXISTS (SELECT 1 FROM auth.users WHERE id = crystal_id) INTO crystal_exists;
+
+    IF NOT phil_exists THEN
+        RAISE EXCEPTION 'Phil UUID % not found in auth.users.', phil_id;
+    END IF;
+    IF NOT crystal_exists THEN
+        RAISE EXCEPTION 'Crystal UUID % not found in auth.users.', crystal_id;
+    END IF;
+
+    RAISE NOTICE 'Owner UUIDs validated: Phil=%, Crystal=%', phil_id, crystal_id;
+END $$;
+
+-- ================================================================
+-- 2. Validate opening balances
+-- ================================================================
+DO $$
+DECLARE
+    chk_bal numeric := NULLIF('{{CHECKING_OPENING_BALANCE}}', 'UNSET');
+    sav_bal numeric := NULLIF('{{SAVINGS_OPENING_BALANCE}}', 'UNSET');
+    csh_bal numeric := NULLIF('{{CASH_OPENING_BALANCE}}', 'UNSET');
+BEGIN
+    IF chk_bal IS NULL THEN
+        RAISE EXCEPTION 'CHECKING_OPENING_BALANCE is UNSET. Replace with the intended value (0.00 is acceptable only if explicitly chosen).';
+    END IF;
+    IF sav_bal IS NULL THEN
+        RAISE EXCEPTION 'SAVINGS_OPENING_BALANCE is UNSET. Replace with the intended value.';
+    END IF;
+    IF csh_bal IS NULL THEN
+        RAISE EXCEPTION 'CASH_OPENING_BALANCE is UNSET. Replace with the intended value.';
+    END IF;
+
+    RAISE NOTICE 'Opening balances confirmed: checking=%, savings=%, cash=%', chk_bal, sav_bal, csh_bal;
+END $$;
+
+-- ================================================================
+-- 3. Verify exactly three accounts: 1 checking, 1 savings, 1 cash, no extras
+-- ================================================================
+DO $$
+DECLARE
+    chk_count integer;
+    sav_count integer;
+    csh_count integer;
+    total     integer;
+BEGIN
+    SELECT count(*) INTO chk_count FROM accounts WHERE type = 'checking';
+    SELECT count(*) INTO sav_count FROM accounts WHERE type = 'savings';
+    SELECT count(*) INTO csh_count FROM accounts WHERE type = 'cash';
+    SELECT count(*) INTO total     FROM accounts;
+
+    IF total != 3 THEN
+        RAISE EXCEPTION 'Expected exactly 3 accounts, found %.', total;
+    END IF;
+    IF chk_count != 1 THEN
+        RAISE EXCEPTION 'Expected exactly 1 checking account, found %.', chk_count;
+    END IF;
+    IF sav_count != 1 THEN
+        RAISE EXCEPTION 'Expected exactly 1 savings account, found %.', sav_count;
+    END IF;
+    IF csh_count != 1 THEN
+        RAISE EXCEPTION 'Expected exactly 1 cash account, found %.', csh_count;
+    END IF;
+
+    RAISE NOTICE 'Accounts verified: 1 checking, 1 savings, 1 cash, 3 total.';
+END $$;
+
+-- ================================================================
+-- 4. Capture pre-reset state for post-verification
+-- ================================================================
+CREATE TEMP TABLE _pre_reset_accounts    AS SELECT * FROM accounts;
+CREATE TEMP TABLE _pre_reset_categories  AS SELECT * FROM categories;
+CREATE TEMP TABLE _pre_reset_subs        AS SELECT * FROM subcategories;
+CREATE TEMP TABLE _pre_reset_trans_count AS SELECT count(*) AS cnt FROM transactions;
 
 DO $$
 DECLARE
-  checking_count integer;
-  savings_count  integer;
-  cash_count     integer;
-  cat_count      integer;
-  sub_count      integer;
+    r record;
 BEGIN
-  -- Verify we have the expected 3 accounts
-  SELECT count(*) INTO checking_count FROM accounts WHERE type = 'checking';
-  SELECT count(*) INTO savings_count  FROM accounts WHERE type = 'savings';
-  SELECT count(*) INTO cash_count     FROM accounts WHERE type = 'cash';
-
-  IF checking_count != 1 THEN
-    RAISE EXCEPTION 'Expected 1 checking account, found %', checking_count;
-  END IF;
-  IF savings_count != 1 THEN
-    RAISE EXCEPTION 'Expected 1 savings account, found %', savings_count;
-  END IF;
-  IF cash_count != 1 THEN
-    RAISE EXCEPTION 'Expected 1 cash account, found %', cash_count;
-  END IF;
-
-  RAISE NOTICE 'Accounts verified: % checking, % savings, % cash', checking_count, savings_count, cash_count;
-
-  -- Verify categories and subcategories exist
-  SELECT count(*) INTO cat_count FROM categories;
-  SELECT count(*) INTO sub_count FROM subcategories;
-  IF cat_count < 1 THEN
-    RAISE EXCEPTION 'No categories found — schema may be incomplete';
-  END IF;
-  RAISE NOTICE 'Categories: %, Subcategories: %', cat_count, sub_count;
-
-  -- Record pre-reset state for verification
-  RAISE NOTICE 'Pre-reset: transactions=%, splits=%, attachments=%, reconciliations=%',
-    (SELECT count(*) FROM transactions),
-    (SELECT count(*) FROM transaction_splits),
-    (SELECT count(*) FROM transaction_attachments),
-    (SELECT count(*) FROM reconciliations);
+    FOR r IN SELECT name, type, opening_balance, current_balance FROM _pre_reset_accounts ORDER BY id LOOP
+        RAISE NOTICE '  Account: % (%) opening=%, current=%', r.name, r.type, r.opening_balance, r.current_balance;
+    END LOOP;
+    RAISE NOTICE 'Pre-reset: % transactions, % categories, % subcategories',
+        (SELECT cnt FROM _pre_reset_trans_count),
+        (SELECT count(*) FROM _pre_reset_categories),
+        (SELECT count(*) FROM _pre_reset_subs);
 END $$;
 
--- ============================================================================
--- PHASE 2: Backup account configuration
--- ============================================================================
-\echo ''
-\echo '--- Phase 2: Capture account configuration ---'
+-- ================================================================
+-- PHASE: clear (removes all transactional data)
+-- ================================================================
+-- ================================================================
+-- phase: clear
+-- Removes all transactional data. Runs after preflight, before migration.
+-- ================================================================
 
--- Snapshot account rows to a temp table for verification after reset
-CREATE TEMP TABLE _pre_deploy_accounts AS SELECT * FROM accounts;
-CREATE TEMP TABLE _pre_deploy_categories AS SELECT * FROM categories;
-CREATE TEMP TABLE _pre_deploy_subcategories AS SELECT * FROM subcategories;
+\echo '--- Clearing transactional data ---'
 
-DO $$
-DECLARE
-  r record;
-BEGIN
-  FOR r IN SELECT name, type, institution, opening_balance FROM _pre_deploy_accounts LOOP
-    RAISE NOTICE '  Preserving: % (%) opening=$%', r.name, r.type, r.opening_balance;
-  END LOOP;
-  RAISE NOTICE 'Account configuration captured.';
-END $$;
-
--- ============================================================================
--- PHASE 3: Clear all transactional data
--- ============================================================================
-\echo ''
-\echo '--- Phase 3: Clear transactional data ---'
-
--- Order matters: delete dependent rows before parents
+-- Order: delete dependent rows before parents
 DELETE FROM transaction_attachments;
 DELETE FROM transaction_splits;
 DELETE FROM reconciliations;
 
--- import_history may not exist yet (it's created by the migration below)
 DO $$
 BEGIN
-  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'import_history') THEN
-    EXECUTE 'DELETE FROM import_history';
-    RAISE NOTICE 'Cleared import_history.';
-  ELSE
-    RAISE NOTICE 'import_history does not exist yet (will be created by migration).';
-  END IF;
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'import_history') THEN
+        EXECUTE 'DELETE FROM import_history';
+    END IF;
 END $$;
 
 DELETE FROM transactions;
 
--- Reset account balances to opening balances (owner must set these first)
+-- Set opening balances to explicitly confirmed values
+UPDATE accounts SET opening_balance = NULLIF('{{CHECKING_OPENING_BALANCE}}', 'UNSET')::numeric WHERE type = 'checking';
+UPDATE accounts SET opening_balance = NULLIF('{{SAVINGS_OPENING_BALANCE}}',  'UNSET')::numeric WHERE type = 'savings';
+UPDATE accounts SET opening_balance = NULLIF('{{CASH_OPENING_BALANCE}}',     'UNSET')::numeric WHERE type = 'cash';
+
+-- Reset current balances to opening balances
 UPDATE accounts SET current_balance = opening_balance, updated_at = now();
 
 DO $$
 DECLARE
-  t_count integer;
+    t_count integer;
 BEGIN
-  SELECT count(*) INTO t_count FROM transactions;
-  IF t_count != 0 THEN
-    RAISE EXCEPTION 'FAIL: transactions table not empty after DELETE — % rows remain', t_count;
-  END IF;
-  RAISE NOTICE 'All transactional data cleared. transactions=0, splits=0, attachments=0, reconciliations=0';
-
-  IF (SELECT count(*) FROM merchant_memory) != 0 THEN
-    RAISE EXCEPTION 'merchant_memory has data that should not exist';
-  END IF;
-  IF (SELECT count(*) FROM scheduled_transactions) != 0 THEN
-    RAISE EXCEPTION 'scheduled_transactions has data that should not exist';
-  END IF;
-  RAISE NOTICE 'merchant_memory=0, scheduled_transactions=0 (confirmed empty)';
+    SELECT count(*) INTO t_count FROM transactions;
+    IF t_count != 0 THEN
+        RAISE EXCEPTION 'FAIL: transactions not empty after clear â€” % rows remain', t_count;
+    END IF;
+    RAISE NOTICE 'Transactional data cleared. transactions=0, splits=0, attachments=0, reconciliations=0.';
 END $$;
 
+-- ================================================================
+-- PHASE: migrate (canonical Financial Center schema + RLS + RPC)
+-- Source: supabase/migrations/001_enable_rls_financial_center.sql
+-- ================================================================
 -- ============================================================================
--- PHASE 4: Apply Financial Center schema & security migration
+-- Gathering Moss Financial Center: Unified Schema, Owner-Only RLS & Atomic Import
+-- Repeatable â€” safe to run multiple times. Does not touch unrelated tables.
 -- ============================================================================
-\echo ''
-\echo '--- Phase 4: Apply FC migration ---'
 
--- Migration is applied inline below. Each section is idempotent.
+-- ============================================================================
+-- 1. FINANCIAL CENTER MEMBERSHIP TABLE
+--    SELECT: members read own row only (user_id = auth.uid()) â€” no recursion
+--    No INSERT / UPDATE / DELETE policies (service_role / dashboard only)
+-- ============================================================================
 
--- 4a. fc_members table
 CREATE TABLE IF NOT EXISTS fc_members (
   user_id   uuid PRIMARY KEY REFERENCES auth.users(id) ON DELETE CASCADE,
   role      text NOT NULL DEFAULT 'owner',
   added_by  uuid,
   added_at  timestamptz NOT NULL DEFAULT now()
 );
+
 ALTER TABLE fc_members ENABLE ROW LEVEL SECURITY;
+
 DROP POLICY IF EXISTS "Members read own row" ON fc_members;
 CREATE POLICY "Members read own row" ON fc_members
   FOR SELECT TO authenticated USING (user_id = auth.uid());
 
--- 4b. Schema extensions
+-- ============================================================================
+-- 2. SCHEMA EXTENSIONS (idempotent column additions)
+--    fingerprint unique constraint is MANDATORY â€” aborts on existing duplicates
+-- ============================================================================
+
 DO $$
 DECLARE
   dup_count integer;
+  dup_report text;
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.columns
@@ -162,7 +220,7 @@ BEGIN
     ALTER TABLE transactions ADD COLUMN fingerprint text;
   END IF;
 
-  -- Audit duplicates before adding unique constraint
+  -- Audit existing duplicates. If any exist, abort with a reporting query.
   SELECT count(*) INTO dup_count FROM (
     SELECT fingerprint FROM transactions
     WHERE fingerprint IS NOT NULL
@@ -170,11 +228,19 @@ BEGIN
   ) dups;
 
   IF dup_count > 0 THEN
-    RAISE EXCEPTION 'MIGRATION ABORTED: % duplicate fingerprint(s) exist.', dup_count;
+    RAISE EXCEPTION 'MIGRATION ABORTED: % duplicate fingerprint(s) exist in transactions.'
+      '  Run this query to list them, resolve manually, then re-run the migration:'
+      '  SELECT fingerprint, count(*) AS occurrences, array_agg(id ORDER BY id) AS transaction_ids'
+      '  FROM transactions WHERE fingerprint IS NOT NULL'
+      '  GROUP BY fingerprint HAVING count(*) > 1 ORDER BY fingerprint;',
+      dup_count;
   END IF;
 
+  -- Safe to add the constraint â€” always, whether column was just created or existed previously
   ALTER TABLE transactions DROP CONSTRAINT IF EXISTS uq_trans_fingerprint;
   ALTER TABLE transactions ADD CONSTRAINT uq_trans_fingerprint UNIQUE (fingerprint);
+
+  RAISE NOTICE 'Fingerprint unique constraint uq_trans_fingerprint applied successfully.';
 END $$;
 
 DO $$
@@ -193,7 +259,10 @@ CREATE INDEX IF NOT EXISTS idx_trans_review ON transactions(review_status);
 CREATE INDEX IF NOT EXISTS idx_trans_fingerprint ON transactions(fingerprint);
 CREATE INDEX IF NOT EXISTS idx_trans_import_id ON transactions(import_id);
 
--- 4c. Import tables
+-- ============================================================================
+-- 3. IMPORT TABLES
+-- ============================================================================
+
 CREATE TABLE IF NOT EXISTS import_profiles (
   id              bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
   name            text NOT NULL UNIQUE,
@@ -223,7 +292,10 @@ CREATE TABLE IF NOT EXISTS import_history (
 CREATE INDEX IF NOT EXISTS idx_import_history_account ON import_history(account_id);
 CREATE INDEX IF NOT EXISTS idx_import_history_date ON import_history(import_date DESC);
 
--- 4d. Foreign keys
+-- ============================================================================
+-- 4. FOREIGN KEYS (type-safe)
+-- ============================================================================
+
 DO $$
 DECLARE
   acc_id_type text;
@@ -265,248 +337,471 @@ BEGIN
   END IF;
 END $$;
 
--- 4e. RLS policies (TO authenticated + fc_members gate)
-CREATE OR REPLACE FUNCTION _fc_rls(target_table text) RETURNS void AS $$
+-- ============================================================================
+-- 5. ROW-LEVEL SECURITY â€” TO authenticated belt-and-suspenders + fc_members gate
+-- ============================================================================
+
+CREATE OR REPLACE FUNCTION fc_apply_rls(target_table text) RETURNS void AS $$
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = target_table) THEN
     EXECUTE format('ALTER TABLE %I ENABLE ROW LEVEL SECURITY', target_table);
   END IF;
 END $$ LANGUAGE plpgsql;
 
-CREATE OR REPLACE FUNCTION _fc_pol(target_table text, pname text, op text) RETURNS void AS $$
+CREATE OR REPLACE FUNCTION fc_create_policy(target_table text, policy_name text, operation text) RETURNS void AS $$
+DECLARE
+  tbl_exists boolean;
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = target_table) THEN RETURN; END IF;
-  EXECUTE format('DROP POLICY IF EXISTS %I ON %I', pname, target_table);
-  IF op = 'SELECT' THEN
-    EXECUTE format('CREATE POLICY %I ON %I FOR SELECT TO authenticated USING (EXISTS (SELECT 1 FROM fc_members WHERE fc_members.user_id = auth.uid()))', pname, target_table);
-  ELSIF op = 'INSERT' THEN
-    EXECUTE format('CREATE POLICY %I ON %I FOR INSERT TO authenticated WITH CHECK (EXISTS (SELECT 1 FROM fc_members WHERE fc_members.user_id = auth.uid()))', pname, target_table);
-  ELSIF op = 'UPDATE' THEN
-    EXECUTE format('CREATE POLICY %I ON %I FOR UPDATE TO authenticated USING (EXISTS (SELECT 1 FROM fc_members WHERE fc_members.user_id = auth.uid())) WITH CHECK (EXISTS (SELECT 1 FROM fc_members WHERE fc_members.user_id = auth.uid()))', pname, target_table);
-  ELSIF op = 'DELETE' THEN
-    EXECUTE format('CREATE POLICY %I ON %I FOR DELETE TO authenticated USING (EXISTS (SELECT 1 FROM fc_members WHERE fc_members.user_id = auth.uid()))', pname, target_table);
+  SELECT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = target_table) INTO tbl_exists;
+  IF NOT tbl_exists THEN RETURN; END IF;
+
+  EXECUTE format('DROP POLICY IF EXISTS %I ON %I', policy_name, target_table);
+
+  IF operation = 'SELECT' THEN
+    EXECUTE format(
+      'CREATE POLICY %I ON %I FOR SELECT TO authenticated USING (EXISTS (SELECT 1 FROM fc_members WHERE fc_members.user_id = auth.uid()))',
+      policy_name, target_table
+    );
+  ELSIF operation = 'INSERT' THEN
+    EXECUTE format(
+      'CREATE POLICY %I ON %I FOR INSERT TO authenticated WITH CHECK (EXISTS (SELECT 1 FROM fc_members WHERE fc_members.user_id = auth.uid()))',
+      policy_name, target_table
+    );
+  ELSIF operation = 'UPDATE' THEN
+    EXECUTE format(
+      'CREATE POLICY %I ON %I FOR UPDATE TO authenticated USING (EXISTS (SELECT 1 FROM fc_members WHERE fc_members.user_id = auth.uid())) WITH CHECK (EXISTS (SELECT 1 FROM fc_members WHERE fc_members.user_id = auth.uid()))',
+      policy_name, target_table
+    );
+  ELSIF operation = 'DELETE' THEN
+    EXECUTE format(
+      'CREATE POLICY %I ON %I FOR DELETE TO authenticated USING (EXISTS (SELECT 1 FROM fc_members WHERE fc_members.user_id = auth.uid()))',
+      policy_name, target_table
+    );
   END IF;
 END $$ LANGUAGE plpgsql;
 
-SELECT _fc_rls(t) FROM unnest(ARRAY[
+-- Apply to all Financial Center tables
+SELECT fc_apply_rls(t) FROM unnest(ARRAY[
   'accounts','categories','subcategories','transactions','merchant_memory',
   'scheduled_transactions','transaction_splits','transaction_attachments',
   'reconciliations','import_history','import_profiles'
 ]) t;
 
-SELECT _fc_pol(t, 'FC members ' || op || ' ' || t, op)
-FROM unnest(ARRAY['SELECT','INSERT','UPDATE','DELETE']) op,
-unnest(ARRAY[
-  'accounts','categories','subcategories','transactions','merchant_memory',
-  'scheduled_transactions','transaction_splits','transaction_attachments',
-  'reconciliations','import_history','import_profiles'
-]) t;
+SELECT fc_create_policy(t, 'FC members can select ' || t, 'SELECT')
+  FROM unnest(ARRAY[
+    'accounts','categories','subcategories','transactions','merchant_memory',
+    'scheduled_transactions','transaction_splits','transaction_attachments',
+    'reconciliations','import_history','import_profiles'
+  ]) t;
 
-DROP FUNCTION IF EXISTS _fc_rls(text);
-DROP FUNCTION IF EXISTS _fc_pol(text,text,text);
+SELECT fc_create_policy(t, 'FC members can insert ' || t, 'INSERT')
+  FROM unnest(ARRAY[
+    'accounts','categories','subcategories','transactions','merchant_memory',
+    'scheduled_transactions','transaction_splits','transaction_attachments',
+    'reconciliations','import_history','import_profiles'
+  ]) t;
 
--- 4f. Atomic import RPC
+SELECT fc_create_policy(t, 'FC members can update ' || t, 'UPDATE')
+  FROM unnest(ARRAY[
+    'accounts','categories','subcategories','transactions','merchant_memory',
+    'scheduled_transactions','transaction_splits','transaction_attachments',
+    'reconciliations','import_history','import_profiles'
+  ]) t;
+
+SELECT fc_create_policy(t, 'FC members can delete ' || t, 'DELETE')
+  FROM unnest(ARRAY[
+    'accounts','categories','subcategories','transactions','merchant_memory',
+    'scheduled_transactions','transaction_splits','transaction_attachments',
+    'reconciliations','import_history','import_profiles'
+  ]) t;
+
+-- Cleanup helper functions
+DROP FUNCTION IF EXISTS fc_apply_rls(text);
+DROP FUNCTION IF EXISTS fc_create_policy(text, text, text);
+
+-- ============================================================================
+-- 6. ATOMIC IMPORT RPC
+--    Serializes per-account via FOR UPDATE. Uses ON CONFLICT for dedup safety.
+--    Rejects null/blank/invalid fingerprints. Entire import is one transaction.
+--    SECURITY INVOKER with locked-down search_path and execute-only-by-authenticated.
+-- ============================================================================
+
 CREATE OR REPLACE FUNCTION fc_import_transactions(
-  p_account_id bigint, p_filename text, p_transactions jsonb
-) RETURNS jsonb LANGUAGE plpgsql SECURITY INVOKER SET search_path = public, pg_temp
-AS $_$
+  p_account_id  bigint,
+  p_filename    text,
+  p_transactions jsonb
+) RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY INVOKER
+SET search_path = public, pg_temp
+AS $$
 DECLARE
-  v_hist_id bigint; v_total_rows integer; v_imported integer := 0;
-  v_duplicates integer := 0; v_review integer := 0; v_row jsonb;
-  v_fingerprint text; v_inserted_id bigint; v_review_stat text;
-  v_category_id bigint; v_subcategory_id bigint; result jsonb;
+  v_hist_id      bigint;
+  v_total_rows   integer;
+  v_imported     integer := 0;
+  v_duplicates   integer := 0;
+  v_review       integer := 0;
+  v_row          jsonb;
+  v_fingerprint  text;
+  v_inserted_id  bigint;
+  v_review_stat  text;
+  v_category_id  bigint;
+  v_subcategory_id bigint;
+  v_account_exists boolean;
+  result         jsonb;
 BEGIN
   v_total_rows := jsonb_array_length(p_transactions);
+
   IF v_total_rows = 0 THEN
-    RETURN jsonb_build_object('success', true, 'import_id', null, 'imported_count', 0, 'duplicate_count', 0, 'review_required_count', 0);
+    RETURN jsonb_build_object(
+      'success', true,
+      'import_id', null,
+      'imported_count', 0,
+      'duplicate_count', 0,
+      'review_required_count', 0
+    );
   END IF;
+
+  -- 1. Lock account row and verify it exists
   PERFORM id FROM accounts WHERE id = p_account_id FOR UPDATE;
-  IF NOT FOUND THEN RAISE EXCEPTION 'Account % does not exist.', p_account_id; END IF;
-  FOR v_row IN SELECT * FROM jsonb_array_elements(p_transactions) LOOP
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Account % does not exist.', p_account_id;
+  END IF;
+
+  -- 2. Validate every fingerprint before writing anything
+  FOR v_row IN SELECT * FROM jsonb_array_elements(p_transactions)
+  LOOP
     v_fingerprint := v_row ->> 'fingerprint';
     IF v_fingerprint IS NULL OR trim(v_fingerprint) = '' THEN
-      RAISE EXCEPTION 'Rejected: row has null or blank fingerprint.';
+      RAISE EXCEPTION 'Rejected: row % has null or blank fingerprint. Every import row requires a valid fingerprint.',
+        (v_row ->> 'date');
     END IF;
     IF length(v_fingerprint) < 8 THEN
-      RAISE EXCEPTION 'Rejected: fingerprint too short.';
+      RAISE EXCEPTION 'Rejected: fingerprint "%" is too short (must be at least 8 chars).', v_fingerprint;
     END IF;
   END LOOP;
+
+  -- 3. Create import history record
   INSERT INTO import_history (filename, account_id, total_rows, new_count, duplicate_count, status)
-  VALUES (p_filename, p_account_id, v_total_rows, 0, 0, 'in_progress') RETURNING id INTO v_hist_id;
-  FOR v_row IN SELECT * FROM jsonb_array_elements(p_transactions) LOOP
+  VALUES (p_filename, p_account_id, v_total_rows, 0, 0, 'in_progress')
+  RETURNING id INTO v_hist_id;
+
+  -- 4. Insert each accepted transaction â€” ON CONFLICT is the only dedup gate
+  FOR v_row IN SELECT * FROM jsonb_array_elements(p_transactions)
+  LOOP
     v_fingerprint := v_row ->> 'fingerprint';
-    IF (v_row ->> 'confidence')::numeric >= 0.7 AND v_row ->> 'suggested_category_id' IS NOT NULL THEN
+
+    -- Determine review status and category (mutually exclusive)
+    IF (v_row ->> 'confidence')::numeric >= 0.7
+       AND v_row ->> 'suggested_category_id' IS NOT NULL
+    THEN
       v_review_stat := 'approved';
       v_category_id := (v_row ->> 'suggested_category_id')::bigint;
       v_subcategory_id := NULLIF(v_row ->> 'suggested_subcategory_id', '')::bigint;
     ELSE
-      v_review_stat := 'pending_review'; v_category_id := NULL; v_subcategory_id := NULL;
+      v_review_stat := 'pending_review';
+      v_category_id := NULL;
+      v_subcategory_id := NULL;
     END IF;
-    INSERT INTO transactions (account_id, date, payee, original_description, amount, transaction_type, category_id, subcategory_id, review_status, cleared_status, import_id, fingerprint)
-    VALUES (p_account_id, COALESCE(v_row ->> 'date', current_date::text), (v_row ->> 'payee'),
-      COALESCE(v_row ->> 'original_description', v_row ->> 'payee'), (v_row ->> 'amount')::numeric,
-      COALESCE(v_row ->> 'transaction_type', CASE WHEN (v_row ->> 'amount')::numeric >= 0 THEN 'income' ELSE 'expense' END),
-      v_category_id, v_subcategory_id, v_review_stat, 'uncleared', v_hist_id, v_fingerprint)
-    ON CONFLICT (fingerprint) DO NOTHING RETURNING id INTO v_inserted_id;
-    IF v_inserted_id IS NOT NULL THEN v_imported := v_imported + 1; IF v_review_stat = 'pending_review' THEN v_review := v_review + 1; END IF;
-    ELSE v_duplicates := v_duplicates + 1; END IF;
-  END LOOP;
-  UPDATE import_history SET new_count = v_imported, duplicate_count = v_duplicates, review_required_count = v_review, status = 'completed' WHERE id = v_hist_id;
-  UPDATE accounts SET current_balance = (SELECT COALESCE(opening_balance, 0) + COALESCE((SELECT sum(amount) FROM transactions WHERE account_id = p_account_id AND review_status = 'approved'), 0)) WHERE id = p_account_id;
-  RETURN jsonb_build_object('success', true, 'import_id', v_hist_id, 'imported_count', v_imported, 'duplicate_count', v_duplicates, 'review_required_count', v_review);
-EXCEPTION WHEN OTHERS THEN RAISE;
-END $_$;
 
--- 4g. RPC privileges
-DO $$ BEGIN
+    INSERT INTO transactions (
+      account_id, date, payee, original_description, amount,
+      transaction_type, category_id, subcategory_id,
+      review_status, cleared_status, import_id, fingerprint
+    ) VALUES (
+      p_account_id,
+      COALESCE(v_row ->> 'date', current_date::text),
+      (v_row ->> 'payee'),
+      COALESCE(v_row ->> 'original_description', v_row ->> 'payee'),
+      (v_row ->> 'amount')::numeric,
+      COALESCE(v_row ->> 'transaction_type',
+        CASE WHEN (v_row ->> 'amount')::numeric >= 0 THEN 'income' ELSE 'expense' END),
+      v_category_id,
+      v_subcategory_id,
+      v_review_stat,
+      'uncleared',
+      v_hist_id,
+      v_fingerprint
+    )
+    ON CONFLICT (fingerprint) DO NOTHING
+    RETURNING id INTO v_inserted_id;
+
+    IF v_inserted_id IS NOT NULL THEN
+      v_imported := v_imported + 1;
+      IF v_review_stat = 'pending_review' THEN
+        v_review := v_review + 1;
+      END IF;
+    ELSE
+      v_duplicates := v_duplicates + 1;
+    END IF;
+  END LOOP;
+
+  -- 5. Update import history with final counts
+  UPDATE import_history
+  SET new_count = v_imported,
+      duplicate_count = v_duplicates,
+      review_required_count = v_review,
+      status = 'completed'
+  WHERE id = v_hist_id;
+
+  -- 6. Recalculate account balance
+  UPDATE accounts
+  SET current_balance = (
+    SELECT COALESCE(opening_balance, 0) + COALESCE(
+      (SELECT sum(amount) FROM transactions
+       WHERE account_id = p_account_id AND review_status = 'approved'), 0
+    )
+  )
+  WHERE id = p_account_id;
+
+  result := jsonb_build_object(
+    'success', true,
+    'import_id', v_hist_id,
+    'imported_count', v_imported,
+    'duplicate_count', v_duplicates,
+    'review_required_count', v_review
+  );
+
+  RETURN result;
+
+EXCEPTION WHEN OTHERS THEN
+  RAISE;
+END $$;
+
+-- Lock down the RPC: only authenticated role may execute
+DO $$
+BEGIN
   REVOKE ALL ON FUNCTION fc_import_transactions(bigint,text,jsonb) FROM PUBLIC;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
-    REVOKE ALL ON FUNCTION fc_import_transactions(bigint,text,jsonb) FROM anon; END IF;
+    REVOKE ALL ON FUNCTION fc_import_transactions(bigint,text,jsonb) FROM anon;
+  END IF;
   IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
-    GRANT EXECUTE ON FUNCTION fc_import_transactions(bigint,text,jsonb) TO authenticated; END IF;
+    GRANT EXECUTE ON FUNCTION fc_import_transactions(bigint,text,jsonb) TO authenticated;
+  END IF;
 END $$;
 
--- 4h. Data API table/sequence privileges (FC objects only)
-DO $$ DECLARE tbl text; seq text;
+-- ============================================================================
+-- 7. DATA API PRIVILEGES
+--    authenticated: minimum required for app (RLS + fc_members gates access)
+--    anon / PUBLIC: no access to FC tables or sequences
+-- ============================================================================
+
+DO $$
+DECLARE
+  tbl text;
 BEGIN
-  FOREACH tbl IN ARRAY ARRAY['accounts','categories','subcategories','transactions','merchant_memory','scheduled_transactions','transaction_splits','transaction_attachments','reconciliations','import_history','import_profiles'] LOOP
+  FOREACH tbl IN ARRAY ARRAY[
+    'accounts','categories','subcategories','transactions','merchant_memory',
+    'scheduled_transactions','transaction_splits','transaction_attachments',
+    'reconciliations','import_history','import_profiles'
+  ] LOOP
     IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = tbl) THEN
+      -- Allow authenticated to use these tables (RLS gates actual row access)
       EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON %I TO authenticated', tbl);
-      IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN EXECUTE format('REVOKE ALL ON %I FROM anon', tbl); END IF;
+      -- Deny anon completely
+      IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+        EXECUTE format('REVOKE ALL ON %I FROM anon', tbl);
+      END IF;
+      -- Deny PUBLIC completely
       EXECUTE format('REVOKE ALL ON %I FROM PUBLIC', tbl);
     END IF;
-    SELECT pg_get_serial_sequence('public.' || tbl, 'id') INTO seq;
-    IF seq IS NOT NULL THEN
-      EXECUTE format('GRANT USAGE ON SEQUENCE %s TO authenticated', seq);
-      IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN EXECUTE format('REVOKE ALL ON SEQUENCE %s FROM anon', seq); END IF;
-      EXECUTE format('REVOKE ALL ON SEQUENCE %s FROM PUBLIC', seq);
-    END IF;
   END LOOP;
-  IF EXISTS (SELECT 1 FROM pg_tables WHERE schemaname = 'public' AND tablename = 'fc_members') THEN
+
+  -- Also revoke on fc_members (already has no client policies, this is belt-and-suspenders)
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'fc_members') THEN
     GRANT SELECT ON fc_members TO authenticated;
     REVOKE INSERT, UPDATE, DELETE ON fc_members FROM authenticated;
-    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN REVOKE ALL ON fc_members FROM anon; END IF;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+      REVOKE ALL ON fc_members FROM anon;
+    END IF;
     REVOKE ALL ON fc_members FROM PUBLIC;
   END IF;
-END $$;
 
-\echo 'Migration applied: tables created, RLS enabled, RPC deployed, grants set.'
-
--- ============================================================================
--- PHASE 5: Enroll Phil and Crystal
--- ============================================================================
-\echo ''
-\echo '--- Phase 5: Enroll owners ---'
-
--- REPLACE THESE WITH ACTUAL UUIDs FROM SUPABASE DASHBOARD BEFORE RUNNING:
--- INSERT INTO fc_members (user_id, role) VALUES
---   ('<phil-uuid>',   'owner'),
---   ('<crystal-uuid>', 'owner')
--- ON CONFLICT DO NOTHING;
-
--- Placeholder: verify the fc_members table is empty and report action needed
-DO $$
-DECLARE
-  cnt integer;
-BEGIN
-  SELECT count(*) INTO cnt FROM fc_members;
-  IF cnt = 0 THEN
-    RAISE NOTICE 'ACTION REQUIRED: Run the following in SQL Editor after deployment:';
-    RAISE NOTICE '  INSERT INTO fc_members (user_id, role) VALUES';
-    RAISE NOTICE '    (''<phil-uuid>'',   ''owner''),';
-    RAISE NOTICE '    (''<crystal-uuid>'', ''owner'')';
-    RAISE NOTICE '  ON CONFLICT DO NOTHING;';
-    RAISE NOTICE 'Find UUIDs in: Supabase Dashboard > Authentication > Users';
-  ELSE
-    RAISE NOTICE 'fc_members already has % enrolled.', cnt;
-  END IF;
-END $$;
-
--- ============================================================================
--- PHASE 6: Post-deployment verification
--- ============================================================================
-\echo ''
-\echo '--- Phase 6: Verify post-deployment state ---'
-
-DO $$
-DECLARE
-  r record;
-  trans_count integer;
-  rls_count   integer;
-BEGIN
-  -- Transactions must be zero
-  SELECT count(*) INTO trans_count FROM transactions;
-  IF trans_count != 0 THEN
-    RAISE EXCEPTION 'FAIL: transactions not empty — % rows remain', trans_count;
-  END IF;
-  RAISE NOTICE 'PASS: transactions = 0';
-
-  -- Transactional tables must be empty
-  IF (SELECT count(*) FROM transaction_splits) != 0 THEN
-    RAISE EXCEPTION 'FAIL: transaction_splits not empty';
-  END IF;
-  IF (SELECT count(*) FROM transaction_attachments) != 0 THEN
-    RAISE EXCEPTION 'FAIL: transaction_attachments not empty';
-  END IF;
-  IF (SELECT count(*) FROM reconciliations) != 0 THEN
-    RAISE EXCEPTION 'FAIL: reconciliations not empty';
-  END IF;
-  RAISE NOTICE 'PASS: all transactional tables empty';
-
-  -- Accounts must be preserved with same IDs and configuration
-  FOR r IN SELECT * FROM _pre_deploy_accounts ORDER BY id LOOP
-    IF NOT EXISTS (SELECT 1 FROM accounts WHERE id = r.id AND name = r.name AND type = r.type) THEN
-      RAISE EXCEPTION 'FAIL: account id=% name=% type=% was lost', r.id, r.name, r.type;
-    END IF;
+  -- Sequence usage: only FC-owned identity sequences, not every sequence in public
+  FOR tbl IN SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND tablename = ANY(ARRAY[
+    'accounts','categories','subcategories','transactions','merchant_memory',
+    'scheduled_transactions','transaction_splits','transaction_attachments',
+    'reconciliations','import_history','import_profiles'
+  ])
+  LOOP
+    EXECUTE format('
+      DO $inner$
+      DECLARE
+        seq_name text;
+      BEGIN
+        SELECT pg_get_serial_sequence(''public.%I'', ''id'') INTO seq_name;
+        IF seq_name IS NOT NULL THEN
+          EXECUTE format(''GRANT USAGE ON SEQUENCE %%s TO authenticated'', seq_name);
+          IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = ''anon'') THEN
+            EXECUTE format(''REVOKE ALL ON SEQUENCE %%s FROM anon'', seq_name);
+          END IF;
+          EXECUTE format(''REVOKE ALL ON SEQUENCE %%s FROM PUBLIC'', seq_name);
+        END IF;
+      END $inner$;
+    ', tbl);
   END LOOP;
-  RAISE NOTICE 'PASS: all % accounts preserved with original IDs, names, and types', (SELECT count(*) FROM _pre_deploy_accounts);
+END $$;
 
-  -- Categories and subcategories preserved
-  IF (SELECT count(*) FROM categories) != (SELECT count(*) FROM _pre_deploy_categories) THEN
-    RAISE EXCEPTION 'FAIL: category count changed';
-  END IF;
-  IF (SELECT count(*) FROM subcategories) != (SELECT count(*) FROM _pre_deploy_subcategories) THEN
-    RAISE EXCEPTION 'FAIL: subcategory count changed';
-  END IF;
-  RAISE NOTICE 'PASS: categories and subcategories preserved';
+-- ============================================================================
+-- 8. ENROLLMENT (run manually in Supabase Dashboard SQL Editor)
+-- ============================================================================
+--   INSERT INTO fc_members (user_id, role) VALUES ('<phil-uuid>', 'owner');
+--   INSERT INTO fc_members (user_id, role) VALUES ('<crystal-uuid>', 'owner');
 
-  -- RLS enabled on all FC tables
-  SELECT count(*) INTO rls_count FROM pg_tables
-  WHERE schemaname = 'public' AND rowsecurity = true
-    AND tablename IN ('accounts','categories','subcategories','transactions','merchant_memory',
-      'scheduled_transactions','transaction_splits','transaction_attachments','reconciliations',
-      'import_history','import_profiles','fc_members');
-  IF rls_count < 12 THEN
-    RAISE EXCEPTION 'FAIL: only % of 12 FC tables have RLS enabled', rls_count;
-  END IF;
-  RAISE NOTICE 'PASS: % FC tables have RLS enabled', rls_count;
+-- ============================================================================
+-- 8. VERIFICATION QUERIES
+-- ============================================================================
+--   SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND rowsecurity = true;
+--   SELECT tablename, policyname, cmd, roles FROM pg_policies WHERE schemaname = 'public' ORDER BY tablename, cmd;
 
-  -- Unique constraint on fingerprint
-  IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_trans_fingerprint') THEN
-    RAISE EXCEPTION 'FAIL: fingerprint unique constraint missing';
-  END IF;
-  RAISE NOTICE 'PASS: fingerprint unique constraint present';
+-- ================================================================
+-- PHASE: enroll (atomic owner enrollment in fc_members)
+-- ================================================================
+-- ================================================================
+-- phase: enroll
+-- Atomically enrolls both Phil and Crystal into fc_members.
+-- Runs after the migration creates the fc_members table.
+-- Both UUIDs were already validated in preflight.
+-- ================================================================
 
-  -- import_history and import_profiles exist
-  IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'import_history') THEN
-    RAISE EXCEPTION 'FAIL: import_history table missing';
-  END IF;
-  IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'import_profiles') THEN
-    RAISE EXCEPTION 'FAIL: import_profiles table missing';
-  END IF;
-  RAISE NOTICE 'PASS: import_history and import_profiles tables exist';
+\echo '--- Enrolling Phil and Crystal ---'
 
-  -- RPC function exists
-  IF NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid WHERE n.nspname = 'public' AND p.proname = 'fc_import_transactions') THEN
-    RAISE EXCEPTION 'FAIL: fc_import_transactions function missing';
-  END IF;
-  RAISE NOTICE 'PASS: fc_import_transactions RPC exists';
+INSERT INTO fc_members (user_id, role) VALUES
+    ('{{PHIL_UUID}}'::uuid,    'owner'),
+    ('{{CRYSTAL_UUID}}'::uuid, 'owner')
+ON CONFLICT DO NOTHING;
+
+DO $$
+DECLARE
+    member_count integer;
+BEGIN
+    SELECT count(*) INTO member_count FROM fc_members;
+    IF member_count != 2 THEN
+        RAISE EXCEPTION 'FAIL: expected exactly 2 fc_members rows after enrollment, found %', member_count;
+    END IF;
+
+    IF NOT EXISTS (SELECT 1 FROM fc_members WHERE user_id = '{{PHIL_UUID}}'::uuid) THEN
+        RAISE EXCEPTION 'FAIL: Phil not found in fc_members after enrollment';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM fc_members WHERE user_id = '{{CRYSTAL_UUID}}'::uuid) THEN
+        RAISE EXCEPTION 'FAIL: Crystal not found in fc_members after enrollment';
+    END IF;
+
+    RAISE NOTICE 'Both owners enrolled in fc_members.';
+END $$;
+
+-- ================================================================
+-- PHASE: verify (post-deployment assertions before COMMIT)
+-- ================================================================
+-- ================================================================
+-- phase: verify
+-- Post-deployment assertions. Must all pass before COMMIT.
+-- ================================================================
+
+\echo '--- Verifying post-deployment state ---'
+
+DO $$
+DECLARE
+    r record;
+BEGIN
+    -- 1. All transactional tables must be zero
+    IF (SELECT count(*) FROM transactions) != 0 THEN
+        RAISE EXCEPTION 'FAIL: % transactions remain', (SELECT count(*) FROM transactions);
+    END IF;
+    IF (SELECT count(*) FROM transaction_splits) != 0 THEN
+        RAISE EXCEPTION 'FAIL: % splits remain', (SELECT count(*) FROM transaction_splits);
+    END IF;
+    IF (SELECT count(*) FROM transaction_attachments) != 0 THEN
+        RAISE EXCEPTION 'FAIL: % attachments remain', (SELECT count(*) FROM transaction_attachments);
+    END IF;
+    IF (SELECT count(*) FROM reconciliations) != 0 THEN
+        RAISE EXCEPTION 'FAIL: % reconciliations remain', (SELECT count(*) FROM reconciliations);
+    END IF;
+    IF (SELECT count(*) FROM import_history) != 0 THEN
+        RAISE EXCEPTION 'FAIL: % import_history rows remain', (SELECT count(*) FROM import_history);
+    END IF;
+    RAISE NOTICE 'PASS: all transactional tables empty (transactions=0, splits=0, attachments=0, reconciliations=0, import_history=0).';
+
+    -- 2. Zero fingerprints and import references
+    IF (SELECT count(*) FROM transactions WHERE fingerprint IS NOT NULL) != 0 THEN
+        RAISE EXCEPTION 'FAIL: fingerprints exist after clear';
+    END IF;
+    IF (SELECT count(*) FROM transactions WHERE import_id IS NOT NULL) != 0 THEN
+        RAISE EXCEPTION 'FAIL: import references exist after clear';
+    END IF;
+    RAISE NOTICE 'PASS: zero fingerprints, zero import references.';
+
+    -- 3. Exactly 3 accounts preserved with same IDs, names, types
+    FOR r IN SELECT * FROM _pre_reset_accounts ORDER BY id LOOP
+        IF NOT EXISTS (SELECT 1 FROM accounts WHERE id = r.id AND name = r.name AND type = r.type) THEN
+            RAISE EXCEPTION 'FAIL: account id=% name=% type=% was lost or altered.', r.id, r.name, r.type;
+        END IF;
+        IF (SELECT opening_balance FROM accounts WHERE id = r.id) IS DISTINCT FROM (SELECT opening_balance FROM _pre_reset_accounts WHERE id = r.id) THEN
+            RAISE NOTICE 'INFO: account % opening balance changed from % to %', r.name, r.opening_balance, (SELECT opening_balance FROM accounts WHERE id = r.id);
+        END IF;
+    END LOOP;
+    IF (SELECT count(*) FROM accounts) != 3 THEN
+        RAISE EXCEPTION 'FAIL: account count changed to %', (SELECT count(*) FROM accounts);
+    END IF;
+    RAISE NOTICE 'PASS: all 3 accounts preserved with exact IDs, names, and types.';
+
+    -- 4. Categories and subcategories preserved
+    IF (SELECT count(*) FROM categories) != (SELECT count(*) FROM _pre_reset_categories) THEN
+        RAISE EXCEPTION 'FAIL: category count changed';
+    END IF;
+    IF (SELECT count(*) FROM subcategories) != (SELECT count(*) FROM _pre_reset_subs) THEN
+        RAISE EXCEPTION 'FAIL: subcategory count changed';
+    END IF;
+    RAISE NOTICE 'PASS: categories (%) and subcategories (%) preserved.',
+        (SELECT count(*) FROM categories), (SELECT count(*) FROM subcategories);
+
+    -- 5. Both owners enrolled
+    IF (SELECT count(*) FROM fc_members) != 2 THEN
+        RAISE EXCEPTION 'FAIL: expected 2 fc_members, found %', (SELECT count(*) FROM fc_members);
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM fc_members WHERE user_id = '{{PHIL_UUID}}'::uuid) THEN
+        RAISE EXCEPTION 'FAIL: Phil missing from fc_members';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM fc_members WHERE user_id = '{{CRYSTAL_UUID}}'::uuid) THEN
+        RAISE EXCEPTION 'FAIL: Crystal missing from fc_members';
+    END IF;
+    RAISE NOTICE 'PASS: both owners enrolled in fc_members.';
+
+    -- 6. Current balances equal opening balances
+    FOR r IN SELECT name, opening_balance, current_balance FROM accounts LOOP
+        IF r.current_balance != r.opening_balance THEN
+            RAISE EXCEPTION 'FAIL: % current=%, opening=%', r.name, r.current_balance, r.opening_balance;
+        END IF;
+    END LOOP;
+    RAISE NOTICE 'PASS: all current balances equal opening balances.';
+
+    -- 7. RLS on all FC tables
+    IF (SELECT count(*) FROM pg_tables WHERE schemaname = 'public' AND rowsecurity = true AND tablename = ANY(ARRAY[
+        'accounts','categories','subcategories','transactions','merchant_memory','scheduled_transactions',
+        'transaction_splits','transaction_attachments','reconciliations','import_history','import_profiles','fc_members'
+    ])) < 12 THEN
+        RAISE EXCEPTION 'FAIL: RLS not enabled on all FC tables';
+    END IF;
+    RAISE NOTICE 'PASS: RLS enabled on all FC tables.';
+
+    -- 8. Schema artifacts present
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'uq_trans_fingerprint') THEN
+        RAISE EXCEPTION 'FAIL: fingerprint unique constraint missing';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'import_history') THEN
+        RAISE EXCEPTION 'FAIL: import_history missing';
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_proc p JOIN pg_namespace n ON p.pronamespace = n.oid WHERE n.nspname = 'public' AND p.proname = 'fc_import_transactions') THEN
+        RAISE EXCEPTION 'FAIL: fc_import_transactions missing';
+    END IF;
+    RAISE NOTICE 'PASS: fingerprint constraint, import tables, and RPC all present.';
 END $$;
 
 -- Cleanup temp tables
-DROP TABLE IF EXISTS _pre_deploy_accounts;
-DROP TABLE IF EXISTS _pre_deploy_categories;
-DROP TABLE IF EXISTS _pre_deploy_subcategories;
+DROP TABLE IF EXISTS _pre_reset_accounts;
+DROP TABLE IF EXISTS _pre_reset_categories;
+DROP TABLE IF EXISTS _pre_reset_subs;
+DROP TABLE IF EXISTS _pre_reset_trans_count;
 
 \echo ''
 \echo '========================================'
@@ -515,16 +810,6 @@ DROP TABLE IF EXISTS _pre_deploy_subcategories;
 
 COMMIT;
 
--- ============================================================================
--- POST-COMMIT: Enrollment instructions
--- ============================================================================
 \echo ''
-\echo '========================================'
-\echo '  NEXT STEP: Enroll Phil and Crystal'
-\echo '========================================'
-\echo '  Run in SQL Editor:'
-\echo '    INSERT INTO fc_members (user_id, role) VALUES'
-\echo '      (''<phil-uuid>'',   ''owner''),'
-\echo '      (''<crystal-uuid>'', ''owner'')'
-\echo '    ON CONFLICT DO NOTHING;'
-\echo '========================================'
+\echo 'Owners enrolled. Anonymous access blocked. RLS active. Fresh start ready.'
+\echo 'Next: verify access (anon=denied, Phil+Crystal=full), set opening balances, deploy app, import PNC CSV.'

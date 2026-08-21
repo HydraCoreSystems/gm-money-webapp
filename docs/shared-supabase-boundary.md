@@ -3,11 +3,10 @@
 ## Project Identity
 
 - **Supabase project ref:** `zaqzlzofgmgvepbcjrut`
-- **Current display name:** Skrybix
+- **Current display name:** Gathering Moss Financial Center
 - **Account/organization:** Gathering Moss
-- **Recommended display name:** Gathering Moss Financial Center
-- **Production status:** The Financial Center is the only active application in this project. Obsolete legacy Skrybix/marketplace objects exist but are not active.
-- **Warning:** Do not rename, drop, or modify any legacy Skrybix/marketplace objects without separate authorization from the owner.
+- **Production status:** The Financial Center is the active application. Obsolete legacy Skrybix/marketplace objects exist but must not be touched without separate authorization.
+- **Warning:** Do not drop, rename, or modify any legacy Skrybix/marketplace objects.
 
 ## Table Classification
 

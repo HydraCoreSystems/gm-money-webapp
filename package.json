@@ -10,7 +10,8 @@
     "test": "node tests/test_all.js",
     "test:client": "node tests/test_client_services.js",
     "test:verify": "node tests/test_verification.js",
-    "test:all": "node tests/test_all.js && node tests/test_client_services.js && node tests/test_verification.js"
+    "test:freshness": "node tests/test_freshness.js",
+    "test:all": "node tests/test_all.js && node tests/test_client_services.js && node tests/test_verification.js && node tests/test_freshness.js"
   },
   "dependencies": {
     "express": "^4.21.2",
