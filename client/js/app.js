@@ -373,4 +373,13 @@ class App {
 // Instantiate application on DOM ready
 document.addEventListener('DOMContentLoaded', () => {
   window.app = new App();
+  window.app.init().catch((err) => {
+    console.error('Failed to initialize Financial Center:', err);
+    document.getElementById('view-content')?.replaceChildren(
+      Object.assign(document.createElement('div'), {
+        className: 'empty-state',
+        textContent: 'The Financial Center could not start. Please reload the page.'
+      })
+    );
+  });
 });
