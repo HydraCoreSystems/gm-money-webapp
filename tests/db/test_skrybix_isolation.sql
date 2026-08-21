@@ -27,38 +27,61 @@ CREATE TABLE _skrybix_baseline (
   privilege    text NOT NULL
 );
 
--- Capture sequence grants
+-- Capture sequence grants (LEFT JOIN preserves PUBLIC via COALESCE)
 INSERT INTO _skrybix_baseline (entity_type, entity_name, grantee, privilege)
-SELECT 'sequence', c.relname, g.rolname, priv
+SELECT 'sequence', c.relname, COALESCE(g.rolname, 'PUBLIC'), priv
 FROM pg_class c
 CROSS JOIN LATERAL (
   SELECT (aclexplode(c.relacl)).grantee AS grantee_oid,
          (aclexplode(c.relacl)).privilege_type AS priv
 ) acl
-JOIN pg_roles g ON g.oid = acl.grantee_oid
+LEFT JOIN pg_roles g ON g.oid = acl.grantee_oid
 WHERE c.relkind = 'S'
   AND c.relname LIKE '%skrybix_control%';
 
--- Capture table grants
+-- Capture table grants (LEFT JOIN preserves PUBLIC via COALESCE)
 INSERT INTO _skrybix_baseline (entity_type, entity_name, grantee, privilege)
-SELECT 'table', 'skrybix_control', g.rolname, priv
+SELECT 'table', 'skrybix_control', COALESCE(g.rolname, 'PUBLIC'), priv
 FROM pg_class c
 CROSS JOIN LATERAL (
   SELECT (aclexplode(c.relacl)).grantee AS grantee_oid,
          (aclexplode(c.relacl)).privilege_type AS priv
 ) acl
-JOIN pg_roles g ON g.oid = acl.grantee_oid
+LEFT JOIN pg_roles g ON g.oid = acl.grantee_oid
 WHERE c.relname = 'skrybix_control' AND c.relkind = 'r';
 
 DO $$
 DECLARE
   cnt integer;
+  has_public_select boolean;
+  has_sequence_grants boolean;
 BEGIN
   SELECT count(*) INTO cnt FROM _skrybix_baseline;
   IF cnt > 0 THEN
-    RAISE NOTICE 'Baseline captured: % grants on skrybix_control table and sequence', cnt;
+    RAISE NOTICE 'Baseline captured: % total grants on skrybix_control table and sequence', cnt;
   ELSE
     RAISE EXCEPTION 'FAIL: no baseline grants captured — skrybix_control may not exist';
+  END IF;
+
+  -- Assert baseline includes PUBLIC SELECT on the table
+  SELECT EXISTS (
+    SELECT 1 FROM _skrybix_baseline
+    WHERE entity_type = 'table' AND grantee = 'PUBLIC' AND privilege = 'SELECT'
+  ) INTO has_public_select;
+  IF has_public_select THEN
+    RAISE NOTICE 'PASS: baseline includes PUBLIC SELECT on skrybix_control';
+  ELSE
+    RAISE EXCEPTION 'FAIL: baseline missing PUBLIC SELECT on skrybix_control — likely an ACL capture bug';
+  END IF;
+
+  -- Assert baseline includes sequence grants (at least one)
+  SELECT EXISTS (
+    SELECT 1 FROM _skrybix_baseline WHERE entity_type = 'sequence'
+  ) INTO has_sequence_grants;
+  IF has_sequence_grants THEN
+    RAISE NOTICE 'PASS: baseline includes sequence grants for skrybix_control identity';
+  ELSE
+    RAISE EXCEPTION 'FAIL: baseline missing sequence grants — ACL capture may be incomplete';
   END IF;
 END $$;
 
@@ -79,24 +102,24 @@ END $$;
 \echo ''
 \echo '--- Step 3: Verify grants unchanged after pass 1 ---'
 
---- Capture current grants
+--- Capture current grants (LEFT JOIN preserves PUBLIC)
 CREATE TEMP TABLE _current_grants AS
-SELECT 'sequence' AS entity_type, c.relname AS entity_name, g.rolname AS grantee, priv AS privilege
+SELECT 'sequence' AS entity_type, c.relname AS entity_name, COALESCE(g.rolname, 'PUBLIC') AS grantee, priv AS privilege
 FROM pg_class c
 CROSS JOIN LATERAL (
   SELECT (aclexplode(c.relacl)).grantee AS grantee_oid,
          (aclexplode(c.relacl)).privilege_type AS priv
 ) acl
-JOIN pg_roles g ON g.oid = acl.grantee_oid
+LEFT JOIN pg_roles g ON g.oid = acl.grantee_oid
 WHERE c.relkind = 'S' AND c.relname LIKE '%skrybix_control%'
 UNION ALL
-SELECT 'table', 'skrybix_control', g.rolname, priv
+SELECT 'table', 'skrybix_control', COALESCE(g.rolname, 'PUBLIC'), priv
 FROM pg_class c
 CROSS JOIN LATERAL (
   SELECT (aclexplode(c.relacl)).grantee AS grantee_oid,
          (aclexplode(c.relacl)).privilege_type AS priv
 ) acl
-JOIN pg_roles g ON g.oid = acl.grantee_oid
+LEFT JOIN pg_roles g ON g.oid = acl.grantee_oid
 WHERE c.relname = 'skrybix_control' AND c.relkind = 'r'
 ;
 
@@ -176,22 +199,22 @@ DROP TABLE IF EXISTS _current_grants;
 \echo '--- Step 5: Verify grants unchanged after pass 2 ---'
 
 CREATE TEMP TABLE _current_grants2 AS
-SELECT 'sequence' AS entity_type, c.relname AS entity_name, g.rolname AS grantee, priv AS privilege
+SELECT 'sequence' AS entity_type, c.relname AS entity_name, COALESCE(g.rolname, 'PUBLIC') AS grantee, priv AS privilege
 FROM pg_class c
 CROSS JOIN LATERAL (
   SELECT (aclexplode(c.relacl)).grantee AS grantee_oid,
          (aclexplode(c.relacl)).privilege_type AS priv
 ) acl
-JOIN pg_roles g ON g.oid = acl.grantee_oid
+LEFT JOIN pg_roles g ON g.oid = acl.grantee_oid
 WHERE c.relkind = 'S' AND c.relname LIKE '%skrybix_control%'
 UNION ALL
-SELECT 'table', 'skrybix_control', g.rolname, priv
+SELECT 'table', 'skrybix_control', COALESCE(g.rolname, 'PUBLIC'), priv
 FROM pg_class c
 CROSS JOIN LATERAL (
   SELECT (aclexplode(c.relacl)).grantee AS grantee_oid,
          (aclexplode(c.relacl)).privilege_type AS priv
 ) acl
-JOIN pg_roles g ON g.oid = acl.grantee_oid
+LEFT JOIN pg_roles g ON g.oid = acl.grantee_oid
 WHERE c.relname = 'skrybix_control' AND c.relkind = 'r'
 ;
 
