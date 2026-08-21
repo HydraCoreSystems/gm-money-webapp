@@ -1,6 +1,4 @@
 BEGIN; \echo GATHERING MOSS -- PRODUCTION RESET
-
--- PHASE: preflight
 -- ================================================================
 -- phase: preflight
 -- Validates environment, owner UUIDs, opening balances, account state
@@ -90,8 +88,6 @@ BEGIN
         (SELECT count(*) FROM _pre_reset_categories),
         (SELECT count(*) FROM _pre_reset_subs);
 END $$;
-
--- PHASE: clear
 -- ================================================================
 -- phase: clear
 -- Removes all transactional data. Runs after preflight, before migration.
@@ -128,8 +124,6 @@ BEGIN
     END IF;
     RAISE NOTICE 'Transactional data cleared. transactions=0, splits=0, attachments=0, reconciliations=0.';
 END $$;
-
--- PHASE: migrate (canonical)
 -- ============================================================================
 -- Gathering Moss Financial Center: Unified Schema, Owner-Only RLS & Atomic Import
 -- Repeatable — safe to run multiple times. Does not touch unrelated tables.
@@ -505,6 +499,8 @@ BEGIN
     END IF;
     v_opening := p_statement_balance - v_imported_net;
     UPDATE accounts SET opening_balance = v_opening WHERE id = p_account_id;
+  ELSIF NOT v_opening_was_null AND p_statement_balance IS NOT NULL THEN
+    RAISE EXCEPTION 'Balance already established for this account. Do not supply statement_balance on subsequent imports.';
   END IF;
 
   -- 6. Update import history with final counts
@@ -628,8 +624,6 @@ END $$;
 -- ============================================================================
 --   SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND rowsecurity = true;
 --   SELECT tablename, policyname, cmd, roles FROM pg_policies WHERE schemaname = 'public' ORDER BY tablename, cmd;
-
--- PHASE: enroll
 -- ================================================================
 -- phase: enroll
 -- Atomically enrolls both Phil and Crystal into fc_members.
@@ -662,8 +656,6 @@ BEGIN
 
     RAISE NOTICE 'Both owners enrolled in fc_members.';
 END $$;
-
--- PHASE: verify
 -- ================================================================
 -- phase: verify
 -- Post-deployment assertions. Must all pass before COMMIT.
@@ -777,7 +769,5 @@ DROP TABLE IF EXISTS _pre_reset_accounts;
 DROP TABLE IF EXISTS _pre_reset_categories;
 DROP TABLE IF EXISTS _pre_reset_subs;
 DROP TABLE IF EXISTS _pre_reset_trans_count;
-
 \echo DEPLOYMENT SUCCESSFUL
 COMMIT;
-\echo 'Owners enrolled. Opening balances NULL -- established atomically during first PNC import.'

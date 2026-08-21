@@ -237,12 +237,16 @@ class App {
 
       // Update accounts in sidebar
       if (this.sidebarAccountsList) {
-        this.sidebarAccountsList.innerHTML = accounts.map(a => `
+        this.sidebarAccountsList.innerHTML = accounts.map(a => {
+          const balDisplay = a.balance_established
+            ? `$${safeFloatDisplay(a.current_balance)}`
+            : '<span style="font-size:10px;color:var(--text-dim);">Not established</span>';
+          return `
           <div class="sidebar-acc-item" data-id="${a.id}">
             <span style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap; max-width: 140px;">${a.name}</span>
-            <span class="acc-bal">$${safeFloatDisplay(a.current_balance)}</span>
-          </div>
-        `).join('');
+            <span class="acc-bal">${balDisplay}</span>
+          </div>`;
+        }).join('');
 
         function safeFloatDisplay(val) {
           const n = typeof val === 'number' ? val : parseFloat(val);

@@ -373,6 +373,8 @@ BEGIN
     END IF;
     v_opening := p_statement_balance - v_imported_net;
     UPDATE accounts SET opening_balance = v_opening WHERE id = p_account_id;
+  ELSIF NOT v_opening_was_null AND p_statement_balance IS NOT NULL THEN
+    RAISE EXCEPTION 'Balance already established for this account. Do not supply statement_balance on subsequent imports.';
   END IF;
 
   -- 6. Update import history with final counts

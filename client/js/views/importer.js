@@ -36,8 +36,13 @@ export async function renderImporter(container, navigateTo) {
               <div class="form-group" style="max-width: 400px;">
                 <label class="form-label" for="import-account-select">Select Destination Account</label>
                 <select class="select" id="import-account-select" required>
-                  ${accounts.map(a => `<option value="${a.id}">${a.name} (${a.institution || a.type})</option>`).join('')}
+                  ${accounts.map(a => `<option value="${a.id}">${a.name} (${a.institution || a.type})${!a.balance_established ? ' — balance not established' : ''}</option>`).join('')}
                 </select>
+                ${accounts.filter(a => !a.balance_established).length > 0 ? `
+                  <div style="margin-top: 8px; font-size: 11px; color: var(--text-dim);">
+                    Accounts with &ldquo;balance not established&rdquo; require a statement balance on first import.
+                  </div>
+                ` : ''}
               </div>
 
               <!-- Drag & Drop Zone -->
@@ -103,16 +108,23 @@ export async function renderImporter(container, navigateTo) {
     const renderPreviewScreen = (accountId) => {
       const p = previewData;
       const account = accounts.find(a => a.id == accountId);
+      const notEstablished = account && !account.balance_established;
+      const newRows = (p.transactions || []).filter(t => !t.is_duplicate);
+      const netAmount = newRows.reduce((sum, t) => sum + (t.amount || 0), 0);
+
+      if (notEstablished && newRows.length > 0) {
+        renderBalanceInitScreen(accountId, account, p, newRows, netAmount);
+        return;
+      }
 
       container.innerHTML = `
         <div style="display: flex; flex-direction: column; gap: 20px;">
-          <!-- Import Summary Bar -->
           <div class="card" style="border-left: 4px solid var(--moss-primary);">
             <div style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 14px;">
               <div>
                 <h3 style="font-size: 16px; font-weight: 700;">Import Preview: ${currentFileName}</h3>
                 <div style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">
-                  Target Account: <strong>${account?.name}</strong> | Detected Format: <strong style="color: var(--moss-light);">${p.profile.name}</strong>
+                  Target Account: <strong>${account?.name}</strong> | Detected Format: <strong style="color: var(--moss-light);">${p.profile_name || p.profile?.name || 'Unknown'}</strong>
                 </div>
               </div>
               <div style="display: flex; gap: 10px;">
@@ -123,7 +135,6 @@ export async function renderImporter(container, navigateTo) {
               </div>
             </div>
 
-            <!-- Deduplication Stats Pills -->
             <div style="display: flex; gap: 16px; margin-top: 16px; flex-wrap: wrap;">
               <div style="background: var(--bg-surface-raised); padding: 8px 14px; border-radius: var(--radius-md); font-size: 13px;">
                 <span style="color: var(--text-dim);">Total Rows:</span> <strong>${p.total_rows}</strong>
@@ -142,59 +153,24 @@ export async function renderImporter(container, navigateTo) {
             </div>
           </div>
 
-          <!-- Preview Table -->
           <div class="card" style="padding: 0; overflow: hidden;">
             <div style="padding: 14px 18px; border-bottom: 1px solid var(--border-subtle); font-weight: 600; font-size: 13.5px;">
               Parsed Transaction Rows (${p.transactions.length})
             </div>
             <div class="table-container" style="max-height: 480px;">
               <table class="data-table">
-                <thead>
-                  <tr>
-                    <th style="width: 50px;">#</th>
-                    <th style="width: 100px;">Date</th>
-                    <th>Normalized Payee</th>
-                    <th>Raw Bank Description</th>
-                    <th class="text-right" style="width: 110px;">Amount</th>
-                    <th>Suggested Category</th>
-                    <th style="width: 90px;">Confidence</th>
-                    <th style="width: 100px;">Status</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  ${p.transactions.map((t, idx) => `
-                    <tr style="${t.is_duplicate ? 'opacity: 0.5; background: rgba(0,0,0,0.15);' : ''}">
-                      <td class="text-mono" style="font-size: 11px; color: var(--text-dim);">${idx + 1}</td>
-                      <td class="text-mono" style="font-size: 12px;">${t.date}</td>
-                      <td><strong>${t.payee}</strong></td>
-                      <td style="font-size: 11.5px; color: var(--text-muted); max-width: 220px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">
-                        ${t.original_description}
-                      </td>
-                      <td class="text-right text-mono ${t.amount < 0 ? 'amount-neg' : 'amount-pos'}">
-                        ${t.amount < 0 ? '-' : '+'}$${Math.abs(t.amount).toFixed(2)}
-                      </td>
-                      <td>
-                        <span class="badge ${t.suggested_category_id ? 'badge-gold' : 'badge-expense'}">
-                          ${t.suggested_category_name ? `${t.suggested_category_name}${t.suggested_subcategory_name ? ' : ' + t.suggested_subcategory_name : ''}` : 'Unassigned'}
-                        </span>
-                      </td>
-                      <td>
-                        ${t.confidence > 0 ? `
-                          <span style="font-size: 11.5px; font-weight: 600; color: ${t.confidence >= 0.9 ? '#86efac' : '#fde047'};">
-                            ${Math.round(t.confidence * 100)}%
-                          </span>
-                        ` : '<span style="color: var(--text-dim); font-size: 11px;">0%</span>'}
-                      </td>
-                      <td>
-                        ${t.is_duplicate ? `
-                          <span class="badge badge-gold" style="font-size: 10.5px;">Duplicate</span>
-                        ` : `
-                          <span class="badge badge-income" style="font-size: 10.5px;">Ready</span>
-                        `}
-                      </td>
-                    </tr>
-                  `).join('')}
-                </tbody>
+                <thead><tr><th style="width:50px;">#</th><th style="width:100px;">Date</th><th>Normalized Payee</th><th>Raw Bank Description</th><th class="text-right" style="width:110px;">Amount</th><th>Suggested Category</th><th style="width:90px;">Confidence</th><th style="width:100px;">Status</th></tr></thead>
+                <tbody>${p.transactions.map((t, idx) => `
+                  <tr style="${t.is_duplicate ? 'opacity:0.5;background:rgba(0,0,0,0.15);' : ''}">
+                    <td class="text-mono" style="font-size:11px;color:var(--text-dim);">${idx + 1}</td>
+                    <td class="text-mono" style="font-size:12px;">${t.date}</td>
+                    <td><strong>${t.payee}</strong></td>
+                    <td style="font-size:11.5px;color:var(--text-muted);max-width:220px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">${t.original_description}</td>
+                    <td class="text-right text-mono ${t.amount < 0 ? 'amount-neg' : 'amount-pos'}">${t.amount < 0 ? '-' : '+'}$${Math.abs(t.amount).toFixed(2)}</td>
+                    <td><span class="badge ${t.suggested_category_id ? 'badge-gold' : 'badge-expense'}">${t.suggested_category_name ? `${t.suggested_category_name}${t.suggested_subcategory_name ? ' : ' + t.suggested_subcategory_name : ''}` : 'Unassigned'}</span></td>
+                    <td>${t.confidence > 0 ? `<span style="font-size:11.5px;font-weight:600;color:${t.confidence >= 0.9 ? '#86efac' : '#fde047'};">${Math.round(t.confidence * 100)}%</span>` : '<span style="color:var(--text-dim);font-size:11px;">0%</span>'}</td>
+                    <td>${t.is_duplicate ? '<span class="badge badge-gold" style="font-size:10.5px;">Duplicate</span>' : '<span class="badge badge-income" style="font-size:10.5px;">Ready</span>'}</td>
+                  </tr>`).join('')}</tbody>
               </table>
             </div>
           </div>
@@ -202,27 +178,150 @@ export async function renderImporter(container, navigateTo) {
       `;
 
       container.querySelector('#preview-cancel-btn')?.addEventListener('click', renderUploadForm);
+      container.querySelector('#preview-commit-btn')?.addEventListener('click', () => commitImport(accountId, null));
+    };
 
-      container.querySelector('#preview-commit-btn')?.addEventListener('click', async () => {
-        try {
-          const commitRes = await api.processImport({
-            filename: currentFileName,
-            account_id: accountId,
-            transactions: p.transactions,
-            auto_approve_confidence: 0.95
-          });
+    const renderBalanceInitScreen = (accountId, account, p, newRows, netAmount) => {
+      const lastTxnDate = newRows.length > 0 ? newRows[newRows.length - 1].date : '';
 
-          showToast(`Successfully imported ${commitRes.imported_count} transactions (${commitRes.duplicate_count} duplicates skipped)`);
+      container.innerHTML = `
+        <div style="display: flex; flex-direction: column; gap: 20px;">
+          <div class="card" style="border-left: 4px solid var(--accent-gold, #e2b357);">
+            <div style="display: flex; flex-direction: column; gap: 16px;">
+              <div>
+                <h3 style="font-size: 16px; font-weight: 700;">Initialize ${account.name} Balance</h3>
+                <div style="font-size: 13px; color: var(--text-muted); margin-top: 4px;">
+                  This account has no established balance. Enter the <strong>PNC statement ending balance</strong> as of the last transaction date to calculate the opening balance.
+                </div>
+              </div>
 
-          if (commitRes.review_required_count > 0) {
-            navigateTo('review');
-          } else {
-            navigateTo('register', { accountId });
-          }
-        } catch (err) {
-          showToast(err.message, 'error');
+              <div class="form-group" style="max-width: 400px;">
+                <label class="form-label" for="balance-statement-input" style="font-weight: 600;">
+                  Statement Ending Balance as of ${lastTxnDate || 'the last transaction date'}
+                </label>
+                <div style="display: flex; align-items: center; gap: 8px;">
+                  <span style="font-size: 18px; font-weight: 700;">$${ }</span>
+                  <input type="text" class="input" id="balance-statement-input" placeholder="e.g. 2500.00" style="font-size: 16px; padding: 10px 14px; width: 200px;" autofocus>
+                </div>
+                <div style="font-size: 11px; color: var(--text-dim); margin-top: 4px;">
+                  This is the balance shown at the bottom of your PNC statement or CSV export after the last transaction.
+                </div>
+              </div>
+
+              <!-- Calculation Preview -->
+              <div class="card" style="background: var(--bg-surface); border: 1px solid var(--border-subtle);">
+                <div style="padding: 14px 18px; border-bottom: 1px solid var(--border-subtle); font-weight: 600; font-size: 13.5px;">
+                  Balance Calculation Preview
+                </div>
+                <div style="padding: 14px 18px; display: flex; flex-direction: column; gap: 8px; font-size: 13px;">
+                  <div style="display: flex; justify-content: space-between;">
+                    <span style="color: var(--text-muted);">New transactions:</span>
+                    <strong>${newRows.length}</strong>
+                  </div>
+                  <div style="display: flex; justify-content: space-between;">
+                    <span style="color: var(--text-muted);">Net transaction amount:</span>
+                    <strong style="color: ${netAmount >= 0 ? 'var(--moss-light)' : 'var(--accent-red)'};">${netAmount >= 0 ? '+' : ''}$${netAmount.toFixed(2)}</strong>
+                  </div>
+                  <div style="display: flex; justify-content: space-between; border-top: 1px solid var(--border-subtle); padding-top: 8px; margin-top: 4px;">
+                    <span>Opening balance =</span>
+                    <span style="font-size: 12px; color: var(--text-dim);">Statement Balance &minus; Net Transactions</span>
+                  </div>
+                  <div id="balance-calc-result" style="font-size: 14px; font-weight: 700; color: var(--moss-light); text-align: right;"></div>
+                  <div style="display: flex; justify-content: space-between; border-top: 1px solid var(--border-subtle); padding-top: 8px; margin-top: 4px;">
+                    <span>Resulting current balance:</span>
+                    <strong id="balance-resulting" style="color: var(--moss-light);"></strong>
+                  </div>
+                </div>
+              </div>
+
+              <div style="display: flex; gap: 10px; justify-content: flex-end;">
+                <button class="btn btn-outline" id="balance-cancel-btn">Cancel</button>
+                <button class="btn btn-primary" id="balance-confirm-btn" disabled>Confirm and Import</button>
+              </div>
+            </div>
+          </div>
+
+          <div class="card" style="padding: 0; overflow: hidden;">
+            <div style="padding: 14px 18px; border-bottom: 1px solid var(--border-subtle); font-weight: 600; font-size: 13.5px;">
+              Transactions to Import (${newRows.length})
+            </div>
+            <div class="table-container" style="max-height: 300px;">
+              <table class="data-table">
+                <thead><tr><th style="width:50px;">#</th><th style="width:100px;">Date</th><th>Payee</th><th class="text-right" style="width:110px;">Amount</th></tr></thead>
+                <tbody>${newRows.map((t, idx) => `
+                  <tr>
+                    <td class="text-mono" style="font-size:11px;color:var(--text-dim);">${idx + 1}</td>
+                    <td class="text-mono" style="font-size:12px;">${t.date}</td>
+                    <td>${t.payee}</td>
+                    <td class="text-right text-mono ${t.amount < 0 ? 'amount-neg' : 'amount-pos'}">${t.amount < 0 ? '-' : '+'}$${Math.abs(t.amount).toFixed(2)}</td>
+                  </tr>`).join('')}</tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      `;
+
+      const balanceInput = container.querySelector('#balance-statement-input');
+      const calcResult = container.querySelector('#balance-calc-result');
+      const balanceResulting = container.querySelector('#balance-resulting');
+      const confirmBtn = container.querySelector('#balance-confirm-btn');
+
+      const updateCalc = () => {
+        const raw = balanceInput.value.replace(/[$,]/g, '').trim();
+        const statementBal = parseFloat(raw);
+        if (!isNaN(statementBal) && raw !== '') {
+          const opening = statementBal - netAmount;
+          const current = statementBal;
+          calcResult.textContent = '$${statementBal.toFixed(2)} &minus; ' + (netAmount >= 0 ? '+$' + netAmount.toFixed(2) : '-$' + Math.abs(netAmount).toFixed(2)) + ' = $$ ' + opening.toFixed(2);
+          balanceResulting.textContent = '$${current.toFixed(2)}';
+          confirmBtn.disabled = false;
+        } else {
+          calcResult.textContent = '\u2014';
+          balanceResulting.textContent = '\u2014';
+          confirmBtn.disabled = true;
         }
+      };
+
+      balanceInput.addEventListener('input', updateCalc);
+
+      container.querySelector('#balance-cancel-btn')?.addEventListener('click', renderUploadForm);
+
+      confirmBtn.addEventListener('click', async () => {
+        if (confirmBtn.disabled) return;
+        const raw = balanceInput.value.replace(/[$,]/g, '').trim();
+        const statementBal = parseFloat(raw);
+        if (isNaN(statementBal)) {
+          showToast('Please enter a valid statement balance.', 'error');
+          return;
+        }
+        await commitImport(accountId, statementBal);
       });
+    };
+
+    const commitImport = async (accountId, statementBalance) => {
+      try {
+        const p = previewData;
+        const commitRes = await api.processImport({
+          filename: currentFileName,
+          account_id: accountId,
+          transactions: p.transactions,
+          statementBalance
+        });
+
+        if (commitRes.opening_established) {
+          showToast(`Balance initialized. Imported ${commitRes.imported_count} transactions (${commitRes.duplicate_count} duplicates skipped).`);
+        } else {
+          showToast(`Successfully imported ${commitRes.imported_count} transactions (${commitRes.duplicate_count} duplicates skipped)`);
+        }
+
+        if (commitRes.review_required_count > 0) {
+          navigateTo('review');
+        } else {
+          navigateTo('register', { accountId });
+        }
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
     };
 
     renderUploadForm();
