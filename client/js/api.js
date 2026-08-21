@@ -9,7 +9,7 @@ function safeFloat(val, fallback = 0) {
   if (val === null || val === undefined || val === '') return fallback;
   const cleaned = String(val).replace(/[\$,]/g, '').trim();
   const n = parseFloat(cleaned);
-  return isNaN(n) ? fallback : n;
+  return isNaN(n) ? fallback : Math.round(n * 100) / 100;
 }
 
 function extractAmount(str) {
@@ -28,7 +28,8 @@ function extractAmount(str) {
   const num = parseFloat(cleaned);
   if (isNaN(num) || num === 0) return null;
 
-  return isNegative ? -num : num;
+  const signedNum = isNegative ? -num : num;
+  return Math.round(signedNum * 100) / 100;
 }
 
 function parseCSV(text) {
@@ -64,52 +65,23 @@ function parseCSV(text) {
   return lines;
 }
 
-let hasAutoHealed = false;
-
 export const api = {
-  // 1. Accounts (with Auto-Repair)
+  // 1. Accounts
   async getAccounts() {
     const { data: rawData, error } = await supabase.from('accounts').select('*');
     if (error) throw error;
 
-    let accounts = rawData || [];
-    const checkingAcc = accounts.find(a => a.type === 'checking') || accounts[0];
-
-    // One-time self-healing on page load: move all transactions to Checking and zero out placeholders
-    if (!hasAutoHealed && checkingAcc) {
-      hasAutoHealed = true;
-      try {
-        await supabase.from('transactions').update({ account_id: checkingAcc.id }).neq('account_id', checkingAcc.id);
-        const { data: trans } = await supabase.from('transactions').select('amount').eq('review_status', 'approved');
-        const totalNet = (trans || []).reduce((sum, t) => sum + safeFloat(t.amount), 0);
-
-        for (const a of accounts) {
-          if (a.id === checkingAcc.id) {
-            await supabase.from('accounts').update({ opening_balance: 0.00, current_balance: totalNet, institution: 'PNC Bank' }).eq('id', a.id);
-            a.opening_balance = 0.00;
-            a.current_balance = totalNet;
-            a.institution = 'PNC Bank';
-          } else {
-            await supabase.from('accounts').update({ opening_balance: 0.00, current_balance: 0.00, institution: 'PNC Bank' }).eq('id', a.id);
-            a.opening_balance = 0.00;
-            a.current_balance = 0.00;
-            a.institution = 'PNC Bank';
-          }
-        }
-      } catch (e) {
-        console.warn('Auto-heal check:', e);
-      }
-    }
+    const accounts = rawData || [];
 
     const formatted = accounts.map(a => ({
       ...a,
-      institution: 'PNC Bank',
+      institution: a.institution || 'Bank',
       opening_balance: safeFloat(a.opening_balance),
       current_balance: safeFloat(a.current_balance)
     })).sort((a, b) => {
       if (a.type === 'checking') return -1;
       if (b.type === 'checking') return 1;
-      return a.name.localeCompare(b.name);
+      return (a.name || '').localeCompare(b.name || '');
     });
 
     return { success: true, accounts: formatted };
@@ -119,7 +91,7 @@ export const api = {
     const openBal = safeFloat(acc.opening_balance);
     const { data, error } = await supabase.from('accounts').insert([{
       name: acc.name.trim(),
-      institution: 'PNC Bank',
+      institution: acc.institution?.trim() || 'Bank',
       type: acc.type,
       opening_balance: openBal,
       current_balance: openBal,
@@ -132,7 +104,7 @@ export const api = {
   async updateAccount(id, acc) {
     const { error } = await supabase.from('accounts').update({
       name: acc.name?.trim(),
-      institution: 'PNC Bank',
+      institution: acc.institution?.trim() || 'Bank',
       type: acc.type,
       opening_balance: safeFloat(acc.opening_balance),
       notes: acc.notes?.trim() || null,
@@ -469,23 +441,15 @@ export const api = {
   },
 
   async processImport({ accountId, transactions }) {
-    let accId = parseInt(accountId, 10);
+    const accId = parseInt(accountId, 10);
     if (isNaN(accId)) {
-      const { data: accs } = await supabase.from('accounts').select('id').eq('type', 'checking').limit(1);
-      if (accs && accs[0]) accId = accs[0].id;
-      else {
-        const { data: anyAcc } = await supabase.from('accounts').select('id').limit(1);
-        if (anyAcc && anyAcc[0]) accId = anyAcc[0].id;
-        else throw new Error('Please create at least one account under Accounts before importing');
-      }
+      throw new Error('Destination account ID is required for import');
     }
-
-    await supabase.from('transactions').delete().eq('amount', 0);
 
     const nonDups = (transactions || []).filter(t => !t.is_duplicate);
 
     if (nonDups.length === 0) {
-      return { success: true, imported_count: 0, duplicate_count: transactions.length, pending_review_count: 0 };
+      return { success: true, imported_count: 0, duplicate_count: (transactions || []).length, pending_review_count: 0 };
     }
 
     const rows = nonDups.map(t => ({
@@ -508,7 +472,7 @@ export const api = {
     return {
       success: true,
       imported_count: rows.length,
-      duplicate_count: transactions.length - rows.length,
+      duplicate_count: (transactions || []).length - rows.length,
       pending_review_count: 0
     };
   },
@@ -903,8 +867,9 @@ export const api = {
     const { data: acc } = await supabase.from('accounts').select('opening_balance').eq('id', accountId).single();
     if (!acc) return;
     const { data: trans } = await supabase.from('transactions').select('amount').eq('account_id', accountId).eq('review_status', 'approved');
-    const transSum = (trans || []).reduce((sum, t) => sum + safeFloat(t.amount), 0);
-    const newBal = safeFloat(acc.opening_balance) + transSum;
+    const transCents = (trans || []).reduce((sum, t) => sum + Math.round(safeFloat(t.amount) * 100), 0);
+    const openCents = Math.round(safeFloat(acc.opening_balance) * 100);
+    const newBal = (openCents + transCents) / 100;
     await supabase.from('accounts').update({ current_balance: newBal }).eq('id', accountId);
   },
 

@@ -51,9 +51,13 @@ class App {
       this.navigateTo('importer');
     });
 
-    document.getElementById('top-backup-btn')?.addEventListener('click', () => {
-      window.location.href = '/api/backup/download-db';
-      showToast('Database backup downloaded');
+    document.getElementById('top-backup-btn')?.addEventListener('click', async () => {
+      try {
+        const res = await api.createBackupSnapshot();
+        showToast(`Backup snapshot created: ${res.filename}`);
+      } catch (err) {
+        showToast(err.message, 'error');
+      }
     });
 
     document.getElementById('sidebar-add-acc-btn')?.addEventListener('click', () => {
