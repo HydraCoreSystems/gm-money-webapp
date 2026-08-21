@@ -190,9 +190,12 @@ CREATE TABLE IF NOT EXISTS reconciliations (
   completed_at          timestamptz DEFAULT now()
 );
 
--- Seed test account for import tests
+-- Seed test accounts matching production (1 checking, 1 savings, 1 cash)
 INSERT INTO accounts (name, institution, type, opening_balance, current_balance)
-VALUES ('PNC Checking', 'PNC Bank', 'checking', 2500.00, 2500.00)
+VALUES
+  ('Gathering Moss Business Checking', 'PNC Bank', 'checking', 2500.00, 2500.00),
+  ('Business Savings & Reserve', 'PNC Bank', 'savings', 0.00, 0.00),
+  ('Cash on Hand', 'Local', 'cash', 0.00, 0.00)
 ON CONFLICT DO NOTHING;
 
 INSERT INTO categories (name, type) VALUES

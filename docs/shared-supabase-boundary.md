@@ -5,101 +5,65 @@
 - **Supabase project ref:** `zaqzlzofgmgvepbcjrut`
 - **Current display name:** Skrybix
 - **Account/organization:** Gathering Moss
-- **Recommended display name:** Skrybix + Financial Center (do not rename without owner approval)
-- **Notes:** This is a **shared** project. It hosts multiple applications. No single application may claim ownership of the schema.
+- **Recommended display name:** Gathering Moss Financial Center
+- **Production status:** The Financial Center is the only active application in this project. Obsolete legacy Skrybix/marketplace objects exist but are not active.
+- **Warning:** Do not rename, drop, or modify any legacy Skrybix/marketplace objects without separate authorization from the owner.
 
-## Table Classification (read-only inventory as of 2026-08-21)
+## Table Classification
 
-### Financial Center Tables (11)
+### Financial Center Tables (14)
 
-| Table | Rows | Notes |
-|:------|:-----|:------|
-| `accounts` | 3 | Checking ($754.82), Savings ($0), Cash ($0). All opening_balance = $0. |
-| `categories` | 9 | Missing Banking & Fees, Taxes & Licenses, Utilities vs seed (11). |
-| `subcategories` | 1 | Only "Plant and Product Sales" under Income. Seed had 30+. |
-| `transactions` | 26 | 14 unique + 12 exact duplicates. All account_id=1. All empty fingerprint. All approved. |
-| `merchant_memory` | 0 | No rules. Seed had 11. |
-| `scheduled_transactions` | 0 | Empty. |
-| `transaction_splits` | 0 | Empty. |
-| `transaction_attachments` | 0 | Empty. |
-| `reconciliations` | 0 | Empty. |
-| `import_history` | — | **Table does not exist.** Migration will create it. |
-| `import_profiles` | — | **Table does not exist.** Migration will create it. |
+| Table | Status | Notes |
+|:------|:-------|:------|
+| `accounts` | Active | 3 rows. Production configuration. Must be preserved. |
+| `categories` | Active | 9 rows. Production configuration. Must be preserved. |
+| `subcategories` | Active | 1 row. Production configuration. Must be preserved. |
+| `transactions` | Active | Fresh start applied. Zero rows. |
+| `merchant_memory` | Active | Empty. |
+| `scheduled_transactions` | Active | Empty. |
+| `transaction_splits` | Active | Empty. |
+| `transaction_attachments` | Active | Empty. |
+| `reconciliations` | Active | Empty. |
+| `import_history` | Created by migration | Fresh. |
+| `import_profiles` | Created by migration | Fresh. |
+| `fc_members` | Created by migration | Owner enrollment table. |
+| `import_history_id_seq` | Auto-created | Identity sequence. |
+| `import_profiles_id_seq` | Auto-created | Identity sequence. |
 
-### Tables the migration creates (2)
+### Skrybix (Legacy — Do Not Touch)
 
-| Table | Created by `CREATE TABLE IF NOT EXISTS` |
-|:------|:----------------------------------------|
-| `fc_members` | Yes — owner membership, references `auth.users` |
-| `import_history` | Yes |
-| `import_profiles` | Yes |
-
-### Core Skrybix Tables
-
-| Table | Rows | Notes |
-|:------|:-----|:------|
-| `marketplace_brand_profiles` | 0 | Exists, empty. Must remain untouched. |
-
-### Legacy / Unused
-
-No other tables found via REST endpoint probing.
+| Table | Status |
+|:------|:-------|
+| `marketplace_brand_profiles` | Obsolete legacy. Exists, empty. Must remain as-is. |
 
 ## Migration Safety Rules
 
-The Financial Center migration (`supabase/migrations/001_enable_rls_financial_center.sql`) follows these rules:
+Financial Center migrations must follow these rules strictly:
 
-1. **Never uses schema-wide grants or revocations.** All GRANT/REVOKE statements target specific FC-owned tables, sequences, and functions.
-2. **Never drops, renames, or truncates any table.** All DDL uses `CREATE ... IF NOT EXISTS`, `ALTER ... ADD COLUMN IF NOT EXISTS`, `ADD CONSTRAINT IF NOT EXISTS`.
-3. **Never modifies `auth` schema objects** except for the `fc_members` table which references `auth.users(id)` via foreign key.
-4. **Never touches `marketplace_brand_profiles`** or any future Skrybix table.
-5. **Uses `fc_` prefix** for all newly created functions and helper routines. Helper functions are dropped after use.
-6. **RLS policies target Financial Center tables only** via an explicit table list, guarded by `IF EXISTS` checks.
+1. **Never use schema-wide grants or revocations.** All `GRANT`, `REVOKE` statements target specific FC-owned tables, sequences, and functions.
+2. **Never drop, rename, or truncate any table.** All DDL uses `CREATE ... IF NOT EXISTS`, `ALTER ... ADD COLUMN IF NOT EXISTS`, `ADD CONSTRAINT IF NOT EXISTS`.
+3. **Never modify `auth` schema objects** except for the `fc_members` table which references `auth.users(id)` via foreign key.
+4. **Never touch any table not in the FC table list** above, regardless of whether it appears empty or unused.
+5. **Use `fc_` prefix** for all newly created functions and helper routines. Helper functions must be dropped after use.
+6. **RLS policies target FC tables only** via an explicit table list, guarded by `IF EXISTS` checks.
 7. **Sequence grants use `pg_get_serial_sequence`** to target only FC-owned identity sequences, never `ALL SEQUENCES`.
+8. **Migration is repeatable** — safe to run multiple times. Uses `DROP ... IF EXISTS` + `CREATE OR REPLACE`.
 
-## Migration Impact Assessment
+## Reset Procedure
 
-Applying `001_enable_rls_financial_center.sql` to production would:
+When a fresh start is required, use `deploy/production-reset.sql`:
+1. The script is a single database transaction.
+2. It clears only FC transactional data (transactions, splits, attachments, reconciliations).
+3. It preserves all account, category, and subcategory rows with their IDs and configuration.
+4. It applies the full schema/security migration.
+5. It verifies post-conditions before committing.
+6. If any step fails, the entire transaction rolls back.
 
-| Action | Affected objects | Skrybix impact |
-|:-------|:-----------------|:---------------|
-| Create `fc_members` table | 1 new table | None |
-| Create `import_history` table | 1 new table | None |
-| Create `import_profiles` table | 1 new table | None |
-| Add `fingerprint` column to `transactions` | 1 existing FC column | None |
-| Add `import_id` column to `transactions` | 1 existing FC column | None |
-| Add unique constraint on `transactions.fingerprint` | 1 existing FC constraint | None (audited: no duplicates yet — column is empty) |
-| Create indexes on FC tables | 8 existing/new FC indexes | None |
-| Add foreign keys | 3 FK constraints on FC tables | None |
-| Enable RLS on 11 existing + 3 new FC tables | 14 tables | None |
-| Create 45 RLS policies (TO authenticated) | 14 tables | None |
-| Grant table/sequence privileges to `authenticated` | 11 FC tables + sequences | None |
-| Revoke from `anon`/`PUBLIC` on FC objects | 11 FC tables + sequences | None |
-| Create `fc_import_transactions` RPC function | 1 new function | None |
-| Lock down RPC (REVOKE FROM PUBLIC/anon, GRANT TO authenticated) | 1 function | None |
+## Verification Checklist
 
-**Zero Skrybix objects are modified.**
-
-## Data Prerequisites
-
-Before applying the migration, the following must be addressed:
-
-1. **Fingerprint unique constraint**: The `transactions.fingerprint` column is empty (all null). The migration's duplicate audit will find 0 duplicates, pass, and add the constraint without issue.
-2. **Duplicate transaction rows**: 12 exact duplicates (IDs 64-75 mirror 50-61). These have empty fingerprints and won't block the unique constraint. They remain until a dedicated cleanup pass.
-3. **Account opening balances**: All 3 accounts have `opening_balance = $0.00`. The migration does not set or modify balances. This must be addressed separately.
-4. **Auth users**: Phil and Crystal need `auth.users` entries. Their UUIDs must be inserted into `fc_members` after migration to activate access.
-
-## Verification Checklist (post-deployment)
-
-- [ ] Migration applied without errors
-- [ ] `import_history` and `import_profiles` tables exist
-- [ ] `transactions.fingerprint` column exists with unique constraint
-- [ ] `transactions.import_id` column exists
-- [ ] All FC tables have RLS enabled (12 tables)
-- [ ] All FC policies are `TO authenticated`
-- [ ] Anonymous cannot SELECT from `accounts` (returns 0 rows)
-- [ ] Phil can SELECT from `accounts` after enrollment
-- [ ] Crystal can SELECT from `accounts` after enrollment
-- [ ] Neither Phil nor Crystal can INSERT into `fc_members`
-- [ ] `fc_import_transactions` RPC is executable by authenticated only
-- [ ] `marketplace_brand_profiles` table untouched (same grants, same data)
-- [ ] JSON backup downloaded before and after for rollback
+- [ ] No FC migration uses `ALL SEQUENCES IN SCHEMA public`
+- [ ] No FC migration uses `GRANT ... TO PUBLIC`
+- [ ] No FC migration drops or renames any table
+- [ ] `marketplace_brand_profiles` has same grants before and after migration
+- [ ] All FC tables have `TO authenticated` RLS policies
+- [ ] `anon` role has zero access to FC tables (RLS + revoked grants)
