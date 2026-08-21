@@ -64,15 +64,46 @@ function parseCSV(text) {
   return lines;
 }
 
+let hasAutoHealed = false;
+
 export const api = {
-  // 1. Accounts (Checking always first)
+  // 1. Accounts (with Auto-Repair)
   async getAccounts() {
-    const { data, error } = await supabase.from('accounts').select('*').order('created_at', { ascending: true });
+    const { data: rawData, error } = await supabase.from('accounts').select('*');
     if (error) throw error;
 
-    const formatted = (data || []).map(a => ({
+    let accounts = rawData || [];
+    const checkingAcc = accounts.find(a => a.type === 'checking') || accounts[0];
+
+    // One-time self-healing on page load: move all transactions to Checking and zero out placeholders
+    if (!hasAutoHealed && checkingAcc) {
+      hasAutoHealed = true;
+      try {
+        await supabase.from('transactions').update({ account_id: checkingAcc.id }).neq('account_id', checkingAcc.id);
+        const { data: trans } = await supabase.from('transactions').select('amount').eq('review_status', 'approved');
+        const totalNet = (trans || []).reduce((sum, t) => sum + safeFloat(t.amount), 0);
+
+        for (const a of accounts) {
+          if (a.id === checkingAcc.id) {
+            await supabase.from('accounts').update({ opening_balance: 0.00, current_balance: totalNet, institution: 'PNC Bank' }).eq('id', a.id);
+            a.opening_balance = 0.00;
+            a.current_balance = totalNet;
+            a.institution = 'PNC Bank';
+          } else {
+            await supabase.from('accounts').update({ opening_balance: 0.00, current_balance: 0.00, institution: 'PNC Bank' }).eq('id', a.id);
+            a.opening_balance = 0.00;
+            a.current_balance = 0.00;
+            a.institution = 'PNC Bank';
+          }
+        }
+      } catch (e) {
+        console.warn('Auto-heal check:', e);
+      }
+    }
+
+    const formatted = accounts.map(a => ({
       ...a,
-      institution: a.institution === 'Chase' ? 'PNC Bank' : (a.institution || 'PNC Bank'),
+      institution: 'PNC Bank',
       opening_balance: safeFloat(a.opening_balance),
       current_balance: safeFloat(a.current_balance)
     })).sort((a, b) => {
@@ -88,7 +119,7 @@ export const api = {
     const openBal = safeFloat(acc.opening_balance);
     const { data, error } = await supabase.from('accounts').insert([{
       name: acc.name.trim(),
-      institution: acc.institution?.trim() || 'PNC Bank',
+      institution: 'PNC Bank',
       type: acc.type,
       opening_balance: openBal,
       current_balance: openBal,
@@ -101,7 +132,7 @@ export const api = {
   async updateAccount(id, acc) {
     const { error } = await supabase.from('accounts').update({
       name: acc.name?.trim(),
-      institution: acc.institution?.trim() || 'PNC Bank',
+      institution: 'PNC Bank',
       type: acc.type,
       opening_balance: safeFloat(acc.opening_balance),
       notes: acc.notes?.trim() || null,
@@ -206,7 +237,7 @@ export const api = {
     const formatted = list.map(t => ({
       ...t,
       amount: safeFloat(t.amount),
-      account_name: accMap[t.account_id]?.name || 'Account',
+      account_name: accMap[t.account_id]?.name || 'Gathering Moss Business Checking',
       account_type: accMap[t.account_id]?.type || 'checking',
       category_name: catMap[t.category_id] || null,
       subcategory_name: subMap[t.subcategory_id] || null,
@@ -449,7 +480,6 @@ export const api = {
       }
     }
 
-    // Automatically remove any old $0.00 placeholder transactions from database
     await supabase.from('transactions').delete().eq('amount', 0);
 
     const nonDups = (transactions || []).filter(t => !t.is_duplicate);
