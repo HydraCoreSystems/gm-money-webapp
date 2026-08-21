@@ -5,7 +5,7 @@
 -- Both UUIDs were already validated in preflight.
 -- ================================================================
 
-\echo '--- Enrolling Phil and Crystal ---'
+SELECT 'Enrolling Phil and Crystal' AS deployment_phase;
 
 INSERT INTO fc_members (user_id, role) VALUES
     ('{{PHIL_UUID}}'::uuid,    'owner'),

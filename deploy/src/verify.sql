@@ -3,7 +3,7 @@
 -- Post-deployment assertions. Must all pass before COMMIT.
 -- ================================================================
 
-\echo '--- Verifying post-deployment state ---'
+SELECT 'Verifying post-deployment state' AS deployment_phase;
 
 DO $$
 DECLARE
@@ -111,3 +111,10 @@ DROP TABLE IF EXISTS _pre_reset_accounts;
 DROP TABLE IF EXISTS _pre_reset_categories;
 DROP TABLE IF EXISTS _pre_reset_subs;
 DROP TABLE IF EXISTS _pre_reset_trans_count;
+
+-- The owner explicitly requires a true fresh start. The temporary database
+-- recovery copy must not leave obsolete transactions behind after success.
+-- If any earlier statement fails, the reset transaction rolls back and this
+-- drop does not occur.
+DROP SCHEMA IF EXISTS fc_backup CASCADE;
+SELECT 'Temporary recovery schema removed; no obsolete transaction copy remains in this database' AS deployment_phase;

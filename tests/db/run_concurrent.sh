@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 # ================================================================
 # True Concurrent Import Test — two simultaneous RPC sessions
 # Uses FOR UPDATE account-row lock for serialization.
@@ -62,10 +62,10 @@ if [ "$EXIT1" != "0" ]; then echo "FAIL: Session 1 exited with code $EXIT1"; exi
 if [ "$EXIT2" != "0" ]; then echo "FAIL: Session 2 exited with code $EXIT2"; exit 1; fi
 
 # Parse results
-S1_IMPORTED=$(grep -o '"imported_count":[0-9]*' "$RESULT_DIR/session_1.txt" | head -1 | grep -o '[0-9]*' || echo "0")
-S1_DUPS=$(grep -o '"duplicate_count":[0-9]*' "$RESULT_DIR/session_1.txt" | head -1 | grep -o '[0-9]*' || echo "0")
-S2_IMPORTED=$(grep -o '"imported_count":[0-9]*' "$RESULT_DIR/session_2.txt" | head -1 | grep -o '[0-9]*' || echo "0")
-S2_DUPS=$(grep -o '"duplicate_count":[0-9]*' "$RESULT_DIR/session_2.txt" | head -1 | grep -o '[0-9]*' || echo "0")
+S1_IMPORTED=$(grep -o '"imported_count":[[:space:]]*[0-9]*' "$RESULT_DIR/session_1.txt" | head -1 | grep -o '[0-9]*' || echo "0")
+S1_DUPS=$(grep -o '"duplicate_count":[[:space:]]*[0-9]*' "$RESULT_DIR/session_1.txt" | head -1 | grep -o '[0-9]*' || echo "0")
+S2_IMPORTED=$(grep -o '"imported_count":[[:space:]]*[0-9]*' "$RESULT_DIR/session_2.txt" | head -1 | grep -o '[0-9]*' || echo "0")
+S2_DUPS=$(grep -o '"duplicate_count":[[:space:]]*[0-9]*' "$RESULT_DIR/session_2.txt" | head -1 | grep -o '[0-9]*' || echo "0")
 
 # One session imported 3, the other saw 3 duplicates (ON CONFLICT)
 TOTAL_IMPORTED=$((S1_IMPORTED + S2_IMPORTED))
@@ -101,7 +101,7 @@ fi
 echo ""
 echo "--- Retry after both sessions ---"
 RETRY_OUT=$($PSQL -c "SELECT set_config('fc_test.user_id', '11111111-1111-1111-1111-111111111111', FALSE); SET ROLE fc_test_role; SELECT fc_import_transactions($ACC_ID, 'retry.csv', '$PAYLOAD'::jsonb);")
-RETRY_DUPS=$(echo "$RETRY_OUT" | grep -o '"duplicate_count":[0-9]*' | grep -o '[0-9]*' || echo "0")
+RETRY_DUPS=$(echo "$RETRY_OUT" | grep -o '"duplicate_count":[[:space:]]*[0-9]*' | grep -o '[0-9]*' || echo "0")
 if [ "$RETRY_DUPS" = "3" ]; then
   echo "PASS: retry after both sessions saw 3 duplicates (idempotent)"
 else

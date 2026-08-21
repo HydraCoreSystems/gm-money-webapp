@@ -98,7 +98,7 @@ export async function showTransactionModal(existing = null, defaultAccountId = n
               <div class="form-group">
                 <label class="form-label" for="form-account">Account</label>
                 <select class="select" name="account_id" id="form-account" required>
-                  ${accounts.map(a => `<option value="${a.id}" ${a.id == initialAccId ? 'selected' : ''}>${a.name} ($${a.current_balance.toFixed(2)})</option>`).join('')}
+                  ${accounts.map(a => `<option value="${a.id}" ${a.id == initialAccId ? 'selected' : ''}>${a.name} (${a.balance_established ? `$${a.current_balance.toFixed(2)}` : 'Not established'})</option>`).join('')}
                 </select>
               </div>
 
@@ -635,7 +635,7 @@ export async function showAccountModal(existing = null, onSaved = null) {
 
             <div class="form-group">
               <label class="form-label" for="acc-open-bal">Opening Balance ($)</label>
-              <input type="number" step="0.01" class="input text-mono" name="opening_balance" id="acc-open-bal" value="${existing ? existing.opening_balance : '0.00'}" required>
+              <input type="number" step="0.01" class="input text-mono" name="opening_balance" id="acc-open-bal" value="${existing && existing.opening_balance != null ? existing.opening_balance : ''}" ${existing && existing.balance_established ? 'required' : ''}>
               <span class="form-hint">For credit cards, positive number is current balance owed</span>
             </div>
 
@@ -670,7 +670,7 @@ export async function showAccountModal(existing = null, onSaved = null) {
       name: fd.get('name'),
       institution: fd.get('institution'),
       type: fd.get('type'),
-      opening_balance: parseFloat(fd.get('opening_balance')) || 0,
+      opening_balance: fd.get('opening_balance') === '' ? null : parseFloat(fd.get('opening_balance')),
       notes: fd.get('notes'),
       active: isEdit ? !!fd.get('active') : 1
     };

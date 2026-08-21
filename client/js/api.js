@@ -39,13 +39,13 @@ export const api = {
   },
 
   async createAccount(acc) {
-    const openBal = safeFloat(acc.opening_balance);
+    const openBal = acc.opening_balance == null ? null : safeFloat(acc.opening_balance);
     const { data, error } = await supabase.from('accounts').insert([{
       name: acc.name.trim(),
       institution: acc.institution?.trim() || 'Bank',
       type: acc.type,
       opening_balance: openBal,
-      current_balance: openBal,
+      current_balance: openBal ?? 0,
       notes: acc.notes?.trim() || null
     }]).select().single();
     if (error) throw error;
@@ -57,7 +57,7 @@ export const api = {
       name: acc.name?.trim(),
       institution: acc.institution?.trim() || 'Bank',
       type: acc.type,
-      opening_balance: safeFloat(acc.opening_balance),
+      opening_balance: acc.opening_balance == null ? null : safeFloat(acc.opening_balance),
       notes: acc.notes?.trim() || null,
       active: acc.active ? true : false,
       updated_at: new Date().toISOString()
@@ -1051,8 +1051,12 @@ export const api = {
   async recalculateBalance(accountId) {
     const { data: acc } = await supabase.from('accounts').select('opening_balance').eq('id', accountId).single();
     if (!acc) return;
-    const { data: trans } = await supabase.from('transactions').select('amount').eq('account_id', accountId).eq('review_status', 'approved');
+    const { data: trans } = await supabase.from('transactions').select('amount').eq('account_id', accountId);
     const transCents = (trans || []).reduce((sum, t) => sum + toCents(t.amount), 0);
+    if (acc.opening_balance == null) {
+      await supabase.from('accounts').update({ current_balance: 0 }).eq('id', accountId);
+      return;
+    }
     const openCents = toCents(acc.opening_balance);
     const newBal = (openCents + transCents) / 100;
     await supabase.from('accounts').update({ current_balance: newBal }).eq('id', accountId);
@@ -1064,7 +1068,7 @@ export const api = {
     await supabase.from('transactions').delete().neq('id', 0);
     const { data: accs } = await supabase.from('accounts').select('*');
     for (const a of (accs || [])) {
-      await supabase.from('accounts').update({ current_balance: safeFloat(a.opening_balance) }).eq('id', a.id);
+      await supabase.from('accounts').update({ current_balance: a.opening_balance == null ? 0 : safeFloat(a.opening_balance) }).eq('id', a.id);
     }
     return { success: true };
   }

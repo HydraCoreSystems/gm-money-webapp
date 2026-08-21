@@ -27,7 +27,8 @@
 ## 5. Backup and Restoration
 - **Backup**: `deploy/backup.sql` — creates `fc_backup` schema with accounts, categories, subcategories, transactions, splits, attachments, reconciliations, import_history, merchant_memory, scheduled_transactions, grants
 - **Verification**: backup counts confirmed before COMMIT
-- **Restoration**: documented inline in backup.sql — INSERT from fc_backup.* tables
+- **Restoration**: `deploy/restore.sql`, exercised against real PostgreSQL before the final reset
+- **No obsolete data retained**: successful reset drops the temporary `fc_backup` schema before commit
 
 ## 6. Unrelated Objects Untouched
 - **Isolation test**: `tests/db/test_skrybix_isolation.sql` — captures baseline of skrybix_control grants, applies migration twice, confirms all 22 grants unchanged (including PUBLIC)

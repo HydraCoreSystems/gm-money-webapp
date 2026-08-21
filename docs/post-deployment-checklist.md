@@ -12,7 +12,7 @@
 
 - [ ] Run `deploy/production-reset.sql` in Supabase Dashboard SQL Editor
 - [ ] Confirm output shows "DEPLOYMENT SUCCESSFUL" and COMMIT
-- [ ] Run enrollment SQL: `INSERT INTO fc_members (user_id, role) VALUES ...`
+- [ ] Confirm both owner UUID placeholders were replaced before running the reset; enrollment occurs atomically inside it
 
 ## Row Count Verification
 

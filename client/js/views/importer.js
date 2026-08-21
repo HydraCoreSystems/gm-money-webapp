@@ -200,7 +200,7 @@ export async function renderImporter(container, navigateTo) {
                   Statement Ending Balance as of ${lastTxnDate || 'the last transaction date'}
                 </label>
                 <div style="display: flex; align-items: center; gap: 8px;">
-                  <span style="font-size: 18px; font-weight: 700;">$${ }</span>
+                  <span style="font-size: 18px; font-weight: 700;">$</span>
                   <input type="text" class="input" id="balance-statement-input" placeholder="e.g. 2500.00" style="font-size: 16px; padding: 10px 14px; width: 200px;" autofocus>
                 </div>
                 <div style="font-size: 11px; color: var(--text-dim); margin-top: 4px;">
@@ -272,8 +272,8 @@ export async function renderImporter(container, navigateTo) {
         if (!isNaN(statementBal) && raw !== '') {
           const opening = statementBal - netAmount;
           const current = statementBal;
-          calcResult.textContent = '$${statementBal.toFixed(2)} &minus; ' + (netAmount >= 0 ? '+$' + netAmount.toFixed(2) : '-$' + Math.abs(netAmount).toFixed(2)) + ' = $$ ' + opening.toFixed(2);
-          balanceResulting.textContent = '$${current.toFixed(2)}';
+          calcResult.textContent = `$${statementBal.toFixed(2)} - ${netAmount >= 0 ? '+$' + netAmount.toFixed(2) : '-$' + Math.abs(netAmount).toFixed(2)} = $${opening.toFixed(2)}`;
+          balanceResulting.textContent = `$${current.toFixed(2)}`;
           confirmBtn.disabled = false;
         } else {
           calcResult.textContent = '\u2014';

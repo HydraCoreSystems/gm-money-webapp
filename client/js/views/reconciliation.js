@@ -35,7 +35,7 @@ export async function renderReconciliation(container, initialParams = {}, naviga
               <div class="form-group">
                 <label class="form-label" for="rec-acc">Select Account to Reconcile</label>
                 <select class="select" id="rec-acc" required>
-                  ${accounts.map(a => `<option value="${a.id}" ${a.id == defaultAccountId ? 'selected' : ''}>${a.name} ($${a.current_balance.toFixed(2)})</option>`).join('')}
+                  ${accounts.map(a => `<option value="${a.id}" ${a.id == defaultAccountId ? 'selected' : ''}>${a.name} (${a.balance_established ? `$${a.current_balance.toFixed(2)}` : 'Not established'})</option>`).join('')}
                 </select>
               </div>
 

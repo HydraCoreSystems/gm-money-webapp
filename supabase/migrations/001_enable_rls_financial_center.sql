@@ -390,7 +390,7 @@ BEGIN
   SET current_balance = (
     SELECT COALESCE(opening_balance, 0) + COALESCE(
       (SELECT sum(amount) FROM transactions
-       WHERE account_id = p_account_id AND review_status = 'approved'), 0
+       WHERE account_id = p_account_id), 0
     )
   )
   WHERE id = p_account_id;

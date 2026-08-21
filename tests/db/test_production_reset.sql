@@ -25,6 +25,12 @@ DECLARE
 BEGIN
   SELECT id INTO acc_id FROM accounts WHERE type = 'checking' LIMIT 1;
 
+  DELETE FROM transaction_attachments;
+  DELETE FROM transaction_splits;
+  DELETE FROM reconciliations;
+  DELETE FROM import_history;
+  DELETE FROM transactions;
+
   -- Original 14 unique transactions
   INSERT INTO transactions (account_id, date, payee, amount, transaction_type, review_status, cleared_status)
   VALUES
@@ -46,7 +52,11 @@ BEGIN
   -- 12 duplicate rows
   INSERT INTO transactions (account_id, date, payee, amount, transaction_type, review_status, cleared_status)
     SELECT acc_id, date, payee, amount, transaction_type, review_status, cleared_status
-    FROM transactions WHERE id <= 14;
+    FROM transactions ORDER BY id LIMIT 12;
+
+  IF (SELECT count(*) FROM transactions) != 26 THEN
+    RAISE EXCEPTION 'FAIL: production-reset fixture must contain exactly 26 transactions';
+  END IF;
 
   -- Add some splits, attachments, reconciliations to test cleanup
   INSERT INTO transaction_splits (transaction_id, category_id, amount, memo)
@@ -65,6 +75,30 @@ BEGIN
     (SELECT count(*) FROM transaction_attachments),
     (SELECT count(*) FROM reconciliations);
   RAISE NOTICE 'Checking balance before reset: %', (SELECT current_balance FROM accounts WHERE id = acc_id);
+END $$;
+
+\echo ''
+\echo '--- Creating verified pre-reset backup ---'
+\i :BACKUP_SCRIPT
+
+\echo ''
+\echo '--- Exercising emergency restore procedure before final reset ---'
+DELETE FROM transaction_attachments;
+DELETE FROM transaction_splits;
+DELETE FROM reconciliations;
+DELETE FROM import_history;
+DELETE FROM transactions;
+\i :RESTORE_SCRIPT
+
+DO $$
+BEGIN
+  IF (SELECT count(*) FROM transactions) != 26 THEN
+    RAISE EXCEPTION 'FAIL: restore did not recover all 26 transactions';
+  END IF;
+  IF (SELECT count(*) FROM accounts) != 3 THEN
+    RAISE EXCEPTION 'FAIL: restore did not preserve all 3 accounts';
+  END IF;
+  RAISE NOTICE 'PASS: emergency restore recovered 26 transactions and 3 accounts.';
 END $$;
 
 -- ================================================================
@@ -140,13 +174,13 @@ BEGIN
   END IF;
   RAISE NOTICE 'PASS: all 3 account types preserved';
 
-  -- Current balances should equal opening balances after reset
+  -- All balances must be explicitly unestablished after reset
   FOR r IN SELECT name, opening_balance, current_balance FROM accounts LOOP
-    IF r.current_balance != r.opening_balance THEN
-      RAISE EXCEPTION 'FAIL: % balance mismatch — opening=% current=%', r.name, r.opening_balance, r.current_balance;
+    IF r.opening_balance IS NOT NULL OR r.current_balance IS DISTINCT FROM 0::numeric THEN
+      RAISE EXCEPTION 'FAIL: % should be unestablished — opening=% current=%', r.name, r.opening_balance, r.current_balance;
     END IF;
   END LOOP;
-  RAISE NOTICE 'PASS: current balances equal opening balances for all accounts';
+  RAISE NOTICE 'PASS: all accounts have opening=NULL and current=0';
 
   -- 6. Categories preserved
   IF (SELECT count(*) FROM categories) < 1 THEN
@@ -209,6 +243,14 @@ BEGIN
       RAISE EXCEPTION 'FAIL: PUBLIC SELECT on skrybix_control lost';
     END IF;
   END IF;
+END $$;
+
+DO $$
+BEGIN
+  IF EXISTS (SELECT 1 FROM information_schema.schemata WHERE schema_name = 'fc_backup') THEN
+    RAISE EXCEPTION 'FAIL: successful reset left obsolete transaction backup in the database';
+  END IF;
+  RAISE NOTICE 'PASS: successful reset leaves no obsolete transaction copy in the database.';
 END $$;
 
 \echo ''

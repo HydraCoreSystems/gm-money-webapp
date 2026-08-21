@@ -1,4 +1,4 @@
-﻿#!/bin/bash
+#!/bin/bash
 # ================================================================
 # Gathering Moss Financial Center — Complete Database Test Suite
 # Spins up a fresh postgres:15 container, runs migration twice,
@@ -8,6 +8,9 @@
 # ================================================================
 
 set -euo pipefail
+
+# Prevent Git Bash on Windows from rewriting container-internal /mnt paths.
+export MSYS_NO_PATHCONV=1
 
 SCRIPT_DIR="$(cd "$(dirname "$0")" && pwd)"
 REPO_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
@@ -71,6 +74,7 @@ grep -E "PASS|FAIL|ERROR|COMPLETED" "$ISOLATION_OUT" || true
 if [ "$ISO_EXIT" -eq 0 ] && ! grep -q "FAIL:" "$ISOLATION_OUT"; then
   pass "Skrybix isolation: migration x2 applied, grants unchanged"
 else
+  cat "$ISOLATION_OUT"
   fail "Skrybix isolation: exit=$ISO_EXIT"
 fi
 rm -f "$ISOLATION_OUT"
@@ -86,7 +90,7 @@ echo "  PHASE 3: Auth Access Control Tests"
 echo "================================================================"
 OUT=$($PSQL < "$REPO_ROOT/tests/db/test_auth.sql" 2>&1)
 P=$(echo "$OUT" | grep -c "PASS:" || true)
-F=$(echo "$OUT" | grep -c "FAIL:" || true)
+F=$(echo "$OUT" | grep -c "^NOTICE:  FAIL:" || true)
 echo "$OUT" | grep -E "PASS|FAIL"
 pass "Auth tests: $P passed" ; [ "$P" -gt 0 ] || fail "Auth tests: 0 passed"
 [ "$F" = "0" ] || fail "Auth tests: $F failures"
@@ -97,9 +101,13 @@ echo "================================================================"
 echo "  PHASE 4: RPC Import Tests"
 echo "================================================================"
 echo "DELETE FROM transactions; DELETE FROM import_history; UPDATE accounts SET current_balance = opening_balance WHERE type = 'checking';" | docker exec -i $CONTAINER psql -U postgres -d gm_test >/dev/null 2>&1
+set +e
 OUT=$($PSQL < "$REPO_ROOT/tests/db/test_rpc_import.sql" 2>&1)
+RPC_IMPORT_EXIT=$?
+set -e
+if [ "$RPC_IMPORT_EXIT" -ne 0 ]; then echo "$OUT"; fail "RPC import test process exited $RPC_IMPORT_EXIT"; fi
 P=$(echo "$OUT" | grep -c "PASS:" || true)
-F=$(echo "$OUT" | grep -c "FAIL:" || true)
+F=$(echo "$OUT" | grep -c "^NOTICE:  FAIL:" || true)
 echo "$OUT" | grep -E "PASS|FAIL"
 pass "RPC import tests: $P passed"
 [ "$F" = "0" ] || fail "RPC import tests: $F failures"
@@ -110,9 +118,13 @@ echo "================================================================"
 echo "  PHASE 5: RPC Authorization Tests"
 echo "================================================================"
 echo "DELETE FROM transactions; DELETE FROM import_history; UPDATE accounts SET current_balance = opening_balance WHERE type = 'checking';" | docker exec -i $CONTAINER psql -U postgres -d gm_test >/dev/null 2>&1
+set +e
 OUT=$($PSQL < "$REPO_ROOT/tests/db/test_rpc_auth.sql" 2>&1)
+RPC_AUTH_EXIT=$?
+set -e
+if [ "$RPC_AUTH_EXIT" -ne 0 ]; then echo "$OUT"; fail "RPC auth test process exited $RPC_AUTH_EXIT"; fi
 P=$(echo "$OUT" | grep -c "PASS:" || true)
-F=$(echo "$OUT" | grep -c "FAIL:" || true)
+F=$(echo "$OUT" | grep -c "^NOTICE:  FAIL:" || true)
 echo "$OUT" | grep -E "PASS|FAIL"
 pass "RPC auth tests: $P passed"
 [ "$F" = "0" ] || fail "RPC auth tests: $F failures"
@@ -147,6 +159,52 @@ fi
 if echo "$OUT" | grep -q "authenticated"; then
   pass "Security: RPC grants restricted to authenticated"
 fi
+
+# 9. Generated production reset against a live-like database
+echo ""
+echo "================================================================"
+echo "  PHASE 8: Production Reset"
+echo "================================================================"
+RESET_TMP=$(mktemp)
+sed -e 's/{{PHIL_UUID}}/11111111-1111-1111-1111-111111111111/g' \
+    -e 's/{{CRYSTAL_UUID}}/22222222-2222-2222-2222-222222222222/g' \
+    "$REPO_ROOT/deploy/production-reset.sql" > "$RESET_TMP"
+RESET_TMP_WINDOWS=$(cygpath -w "$RESET_TMP")
+docker cp "$RESET_TMP_WINDOWS" "$CONTAINER:/tmp/production-reset-test.sql" >/dev/null
+rm -f "$RESET_TMP"
+docker cp "$(cygpath -w "$REPO_ROOT/deploy/backup.sql")" "$CONTAINER:/tmp/backup-test.sql" >/dev/null
+docker cp "$(cygpath -w "$REPO_ROOT/deploy/restore.sql")" "$CONTAINER:/tmp/restore-test.sql" >/dev/null
+set +e
+OUT=$($PSQL \
+  --set=RESET_SCRIPT='/tmp/production-reset-test.sql' \
+  --set=BACKUP_SCRIPT='/tmp/backup-test.sql' \
+  --set=RESTORE_SCRIPT='/tmp/restore-test.sql' \
+  < "$REPO_ROOT/tests/db/test_production_reset.sql" 2>&1)
+RESET_EXIT=$?
+set -e
+if [ "$RESET_EXIT" -ne 0 ]; then echo "$OUT"; fail "Production reset test process exited $RESET_EXIT"; fi
+echo "$OUT" | grep -E "PASS|FAIL|SUCCESSFUL" || true
+if [ "$RESET_EXIT" -eq 0 ] && ! echo "$OUT" | grep -q "FAIL:"; then
+  pass "Production reset: exact fresh start, account preservation, atomic owner enrollment"
+else
+  fail "Production reset assertions failed"
+fi
+
+# 10. Dynamic opening-balance lifecycle after reset
+echo ""
+echo "================================================================"
+echo "  PHASE 9: Balance Establishment"
+echo "================================================================"
+set +e
+OUT=$($PSQL < "$REPO_ROOT/tests/db/test_balance_establishment.sql" 2>&1)
+BALANCE_EXIT=$?
+set -e
+if [ "$BALANCE_EXIT" -ne 0 ]; then echo "$OUT"; fail "Balance test process exited $BALANCE_EXIT"; fi
+P=$(echo "$OUT" | grep -c "PASS:" || true)
+F=$(echo "$OUT" | grep -c "^NOTICE:  FAIL:" || true)
+echo "$OUT" | grep -E "PASS|FAIL"
+pass "Balance establishment tests: $P passed"
+[ "$F" = "0" ] || fail "Balance establishment tests: $F failures"
 
 # ================================================================
 echo ""

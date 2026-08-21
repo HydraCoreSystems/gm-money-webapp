@@ -319,16 +319,16 @@ DECLARE
   acc_id bigint;
   open_bal numeric;
   new_bal numeric;
-  approved_sum numeric;
+  transaction_sum numeric;
 BEGIN
   SELECT id, opening_balance INTO acc_id, open_bal FROM accounts WHERE type = 'checking' LIMIT 1;
-  SELECT sum(amount) INTO approved_sum FROM transactions
-  WHERE account_id = acc_id AND review_status = 'approved';
+  SELECT sum(amount) INTO transaction_sum FROM transactions
+  WHERE account_id = acc_id;
 
-  new_bal := COALESCE(open_bal, 0) + COALESCE(approved_sum, 0);
+  new_bal := COALESCE(open_bal, 0) + COALESCE(transaction_sum, 0);
 
   IF (SELECT current_balance FROM accounts WHERE id = acc_id) = new_bal THEN
-    RAISE NOTICE 'PASS: balance — current_balance = opening(%) + approved_sum(%) = %', open_bal, approved_sum, new_bal;
+    RAISE NOTICE 'PASS: balance — current_balance = opening(%) + all bank transactions(%) = %', open_bal, transaction_sum, new_bal;
   ELSE
     RAISE EXCEPTION 'FAIL: balance mismatch. Current=%, Expected=%', (SELECT current_balance FROM accounts WHERE id = acc_id), new_bal;
   END IF;

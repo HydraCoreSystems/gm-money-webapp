@@ -1,4 +1,15 @@
-BEGIN; \echo GATHERING MOSS -- PRODUCTION RESET
+-- Gathering Moss Financial Center — Production Reset & Deployment
+-- GENERATED FILE — do not edit directly.
+-- Compatible with the Supabase Dashboard SQL Editor.
+-- Replace {{PHIL_UUID}} and {{CRYSTAL_UUID}}, then run the complete file.
+
+BEGIN;
+
+SELECT 'GATHERING MOSS — PRODUCTION RESET STARTED' AS deployment_status;
+
+-- ================================================================
+-- PHASE: preflight
+-- ================================================================
 -- ================================================================
 -- phase: preflight
 -- Validates environment, owner UUIDs, opening balances, account state
@@ -88,12 +99,16 @@ BEGIN
         (SELECT count(*) FROM _pre_reset_categories),
         (SELECT count(*) FROM _pre_reset_subs);
 END $$;
+
+-- ================================================================
+-- PHASE: clear
+-- ================================================================
 -- ================================================================
 -- phase: clear
 -- Removes all transactional data. Runs after preflight, before migration.
 -- ================================================================
 
-\echo '--- Clearing transactional data ---'
+SELECT 'Clearing transactional data' AS deployment_phase;
 
 -- Order: delete dependent rows before parents
 DELETE FROM transaction_attachments;
@@ -124,6 +139,10 @@ BEGIN
     END IF;
     RAISE NOTICE 'Transactional data cleared. transactions=0, splits=0, attachments=0, reconciliations=0.';
 END $$;
+
+-- ================================================================
+-- PHASE: migrate
+-- ================================================================
 -- ============================================================================
 -- Gathering Moss Financial Center: Unified Schema, Owner-Only RLS & Atomic Import
 -- Repeatable — safe to run multiple times. Does not touch unrelated tables.
@@ -516,7 +535,7 @@ BEGIN
   SET current_balance = (
     SELECT COALESCE(opening_balance, 0) + COALESCE(
       (SELECT sum(amount) FROM transactions
-       WHERE account_id = p_account_id AND review_status = 'approved'), 0
+       WHERE account_id = p_account_id), 0
     )
   )
   WHERE id = p_account_id;
@@ -624,6 +643,10 @@ END $$;
 -- ============================================================================
 --   SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND rowsecurity = true;
 --   SELECT tablename, policyname, cmd, roles FROM pg_policies WHERE schemaname = 'public' ORDER BY tablename, cmd;
+
+-- ================================================================
+-- PHASE: enroll
+-- ================================================================
 -- ================================================================
 -- phase: enroll
 -- Atomically enrolls both Phil and Crystal into fc_members.
@@ -631,7 +654,7 @@ END $$;
 -- Both UUIDs were already validated in preflight.
 -- ================================================================
 
-\echo '--- Enrolling Phil and Crystal ---'
+SELECT 'Enrolling Phil and Crystal' AS deployment_phase;
 
 INSERT INTO fc_members (user_id, role) VALUES
     ('{{PHIL_UUID}}'::uuid,    'owner'),
@@ -656,12 +679,16 @@ BEGIN
 
     RAISE NOTICE 'Both owners enrolled in fc_members.';
 END $$;
+
+-- ================================================================
+-- PHASE: verify
+-- ================================================================
 -- ================================================================
 -- phase: verify
 -- Post-deployment assertions. Must all pass before COMMIT.
 -- ================================================================
 
-\echo '--- Verifying post-deployment state ---'
+SELECT 'Verifying post-deployment state' AS deployment_phase;
 
 DO $$
 DECLARE
@@ -769,5 +796,14 @@ DROP TABLE IF EXISTS _pre_reset_accounts;
 DROP TABLE IF EXISTS _pre_reset_categories;
 DROP TABLE IF EXISTS _pre_reset_subs;
 DROP TABLE IF EXISTS _pre_reset_trans_count;
-\echo DEPLOYMENT SUCCESSFUL
+
+-- The owner explicitly requires a true fresh start. The temporary database
+-- recovery copy must not leave obsolete transactions behind after success.
+-- If any earlier statement fails, the reset transaction rolls back and this
+-- drop does not occur.
+DROP SCHEMA IF EXISTS fc_backup CASCADE;
+SELECT 'Temporary recovery schema removed; no obsolete transaction copy remains in this database' AS deployment_phase;
+
+SELECT 'DEPLOYMENT VERIFIED — COMMITTING' AS deployment_status;
 COMMIT;
+SELECT 'DEPLOYMENT SUCCESSFUL — BOTH OWNERS ENROLLED' AS deployment_status;

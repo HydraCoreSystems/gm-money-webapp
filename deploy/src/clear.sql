@@ -3,7 +3,7 @@
 -- Removes all transactional data. Runs after preflight, before migration.
 -- ================================================================
 
-\echo '--- Clearing transactional data ---'
+SELECT 'Clearing transactional data' AS deployment_phase;
 
 -- Order: delete dependent rows before parents
 DELETE FROM transaction_attachments;

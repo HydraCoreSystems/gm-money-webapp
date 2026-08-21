@@ -41,6 +41,28 @@ BEGIN
 END $$;
 
 \echo ""
+\echo "--- Test 2b: Pending-review transactions still affect the bank balance ---"
+DO $$
+DECLARE acc_id bigint; result jsonb;
+BEGIN
+  SELECT id INTO acc_id FROM accounts WHERE type = 'cash' LIMIT 1;
+  UPDATE accounts SET opening_balance = NULL, current_balance = 0 WHERE id = acc_id;
+  result := fc_import_transactions(acc_id, 'pending-balance.csv',
+    '[{"date":"2026-01-01","payee":"Needs Category","amount":-25.00,"transaction_type":"expense","suggested_category_id":null,"confidence":0.10,"fingerprint":"fp-pending-balance|1"}]'::jsonb,
+    100.00);
+  IF (SELECT opening_balance FROM accounts WHERE id = acc_id) != 125.00 THEN
+    RAISE EXCEPTION 'FAIL: pending-review opening balance incorrect';
+  END IF;
+  IF (SELECT current_balance FROM accounts WHERE id = acc_id) != 100.00 THEN
+    RAISE EXCEPTION 'FAIL: pending-review bank transaction was excluded from current balance';
+  END IF;
+  IF (SELECT review_status FROM transactions WHERE fingerprint = 'fp-pending-balance|1') != 'pending_review' THEN
+    RAISE EXCEPTION 'FAIL: fixture did not enter pending review';
+  END IF;
+  RAISE NOTICE 'PASS: pending-review transaction affects balance while awaiting categorization.';
+END $$;
+
+\echo ""
 \echo "--- Test 3: Import after balance established ---"
 DO $$
 DECLARE acc_id bigint; old_opening numeric;
