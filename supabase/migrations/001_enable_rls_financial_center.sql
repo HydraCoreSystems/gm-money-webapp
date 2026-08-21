@@ -337,7 +337,7 @@ BEGIN
       review_status, cleared_status, import_id, fingerprint
     ) VALUES (
       p_account_id,
-      COALESCE(v_row ->> 'date', current_date::text),
+      COALESCE(NULLIF(v_row ->> 'date', '')::date, current_date),
       (v_row ->> 'payee'),
       COALESCE(v_row ->> 'original_description', v_row ->> 'payee'),
       (v_row ->> 'amount')::numeric,

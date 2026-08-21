@@ -106,8 +106,8 @@ CREATE TABLE IF NOT EXISTS subcategories (
 CREATE TABLE IF NOT EXISTS transactions (
   id                    bigint PRIMARY KEY GENERATED ALWAYS AS IDENTITY,
   account_id            bigint,
-  date                  text NOT NULL,
-  posted_date           text,
+  date                  date NOT NULL,
+  posted_date           date,
   payee                 text NOT NULL,
   original_description  text,
   amount                numeric(12,2) NOT NULL,
