@@ -16,3 +16,6 @@ data/attachments/
 Thumbs.db
 .vscode/
 .idea/
+
+.vercel
+.env*
