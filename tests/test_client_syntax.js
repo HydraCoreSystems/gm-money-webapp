@@ -21,6 +21,14 @@ for (const file of jsFiles(clientRoot)) {
 }
 console.log('PASS: every shipped client JavaScript file parses.');
 
+const appSource = fs.readFileSync(path.join(clientRoot, 'app.js'), 'utf8');
+assert.match(
+  appSource,
+  /window\.app\s*=\s*new App\(\);[\s\S]*window\.app\.init\(\)/,
+  'The browser entrypoint must initialize the App after constructing it'
+);
+console.log('PASS: the browser entrypoint starts the Financial Center application.');
+
 const migration = fs.readFileSync(path.join(repoRoot, 'supabase', 'migrations', '001_enable_rls_financial_center.sql'), 'utf8');
 assert.ok(!/account_id\s*=\s*p_account_id\s+AND\s+review_status\s*=\s*'approved'/i.test(migration), 'Account balance must include every imported bank transaction, including pending-review rows');
 console.log('PASS: account balance calculation includes pending-review transactions.');
