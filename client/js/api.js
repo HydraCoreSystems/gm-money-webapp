@@ -449,84 +449,51 @@ export const api = {
       return { success: true, imported_count: 0, duplicate_count: (transactions || []).length, review_required_count: 0 };
     }
 
-    // Create import history record
-    const { data: historyRow, error: histErr } = await supabase.from('import_history').insert([{
-      filename: filename || 'manual_import.csv',
-      account_id: accId,
-      total_rows: (transactions || []).length,
-      new_count: nonDups.length,
-      duplicate_count: (transactions || []).length - nonDups.length,
-      error_count: 0,
-      status: 'completed'
-    }]).select().single();
+    // Partition: each transaction belongs to exactly one outcome
+    const payloadRows = nonDups.map(t => {
+      const highConf = (t.confidence ?? 0) >= 0.7;
+      const hasSuggestion = t.suggested_category_id != null;
 
-    const importId = historyRow?.id || null;
-
-    // Separate auto-approve and review-required
-    const toApprove = nonDups.filter(t => t.confidence >= 0.7 && (t.suggested_category_id || !t.category_id));
-    const toReview = nonDups.filter(t => t.confidence < 0.7 || (!t.suggested_category_id && !t.category_id));
-
-    let importedCount = 0;
-
-    // Insert auto-approved transactions
-    if (toApprove.length > 0) {
-      const rows = toApprove.map(t => ({
-        account_id: accId,
+      return {
         date: t.date || new Date().toISOString().slice(0, 10),
         payee: t.payee || 'Bank Transaction',
         original_description: t.original_description || t.payee,
         amount: safeFloat(t.amount),
         transaction_type: t.transaction_type || (safeFloat(t.amount) >= 0 ? 'income' : 'expense'),
-        category_id: t.suggested_category_id ? parseInt(t.suggested_category_id, 10) : null,
-        subcategory_id: t.suggested_subcategory_id ? parseInt(t.suggested_subcategory_id, 10) : null,
-        review_status: 'approved',
-        cleared_status: 'uncleared',
-        import_id: importId,
-        fingerprint: t.fingerprint || null
-      }));
+        suggested_category_id: hasSuggestion ? parseInt(t.suggested_category_id, 10) : null,
+        suggested_subcategory_id: t.suggested_subcategory_id ? parseInt(t.suggested_subcategory_id, 10) : null,
+        confidence: safeFloat(t.confidence ?? 0),
+        fingerprint: t.fingerprint || null,
+        meta: { highConf, hasSuggestion }
+      };
+    });
 
-      const { error } = await supabase.from('transactions').insert(rows);
-      if (error) throw error;
-      importedCount += rows.length;
+    // Verify classification is mutually exclusive
+    const approveCount = payloadRows.filter(r => r.meta.highConf && r.meta.hasSuggestion).length;
+    const reviewCount = payloadRows.length - approveCount;
+
+    // Call the atomic RPC — everything succeeds or nothing persists
+    const { data: result, error: rpcError } = await supabase.rpc('fc_import_transactions', {
+      p_account_id: accId,
+      p_filename: filename || 'manual_import.csv',
+      p_transactions: payloadRows
+    });
+
+    if (rpcError) {
+      throw new Error('Import failed: ' + rpcError.message);
     }
 
-    // Insert review-required transactions
-    if (toReview.length > 0) {
-      const rows = toReview.map(t => ({
-        account_id: accId,
-        date: t.date || new Date().toISOString().slice(0, 10),
-        payee: t.payee || 'Bank Transaction',
-        original_description: t.original_description || t.payee,
-        amount: safeFloat(t.amount),
-        transaction_type: t.transaction_type || (safeFloat(t.amount) >= 0 ? 'income' : 'expense'),
-        category_id: null,
-        subcategory_id: null,
-        review_status: 'pending_review',
-        cleared_status: 'uncleared',
-        import_id: importId,
-        fingerprint: t.fingerprint || null
-      }));
-
-      const { error } = await supabase.from('transactions').insert(rows);
-      if (error) throw error;
-      importedCount += rows.length;
+    if (!result || !result.success) {
+      throw new Error('Import RPC returned without success');
     }
 
-    // Update import history status
-    if (importId) {
-      await supabase.from('import_history').update({
-        new_count: importedCount,
-        review_required_count: toReview.length,
-        status: 'completed'
-      }).eq('id', importId);
-    }
-
-    await this.recalculateBalance(accId);
     return {
       success: true,
-      imported_count: importedCount,
-      duplicate_count: (transactions || []).length - nonDups.length,
-      review_required_count: toReview.length
+      import_id: result.import_id,
+      imported_count: result.imported_count,
+      duplicate_count: result.duplicate_count,
+      review_required_count: result.review_required_count,
+      classified: { approved: approveCount, review: reviewCount }
     };
   },
 

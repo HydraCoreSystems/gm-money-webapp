@@ -1,13 +1,12 @@
 -- ============================================================================
--- Gathering Moss Financial Center: Unified Schema & Owner-Only RLS Migration
+-- Gathering Moss Financial Center: Unified Schema, Owner-Only RLS & Atomic Import
 -- Repeatable — safe to run multiple times. Does not touch unrelated tables.
 -- ============================================================================
 
 -- ============================================================================
 -- 1. FINANCIAL CENTER MEMBERSHIP TABLE
 --    SELECT: members read own row only (user_id = auth.uid()) — no recursion
---    INSERT / UPDATE / DELETE: no browser-client policies (service_role / dashboard only)
---    Enrollment: INSERT via Supabase Dashboard SQL Editor (service_role bypasses RLS)
+--    No INSERT / UPDATE / DELETE policies (service_role / dashboard only)
 -- ============================================================================
 
 CREATE TABLE IF NOT EXISTS fc_members (
@@ -21,19 +20,35 @@ ALTER TABLE fc_members ENABLE ROW LEVEL SECURITY;
 
 DROP POLICY IF EXISTS "Members read own row" ON fc_members;
 CREATE POLICY "Members read own row" ON fc_members
-  FOR SELECT USING (user_id = auth.uid());
+  FOR SELECT TO authenticated USING (user_id = auth.uid());
 
 -- ============================================================================
 -- 2. SCHEMA EXTENSIONS (idempotent column additions)
+--    fingerprint unique constraint is conditional: audits for duplicates first
 -- ============================================================================
 
 DO $$
+DECLARE
+  dup_count integer;
 BEGIN
   IF NOT EXISTS (
     SELECT 1 FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = 'transactions' AND column_name = 'fingerprint'
   ) THEN
     ALTER TABLE transactions ADD COLUMN fingerprint text;
+  END IF;
+
+  -- Audit: do not add unique constraint if duplicates exist
+  SELECT count(*) INTO dup_count FROM (
+    SELECT fingerprint FROM transactions
+    WHERE fingerprint IS NOT NULL
+    GROUP BY fingerprint HAVING count(*) > 1
+  ) dups;
+
+  IF dup_count > 0 THEN
+    RAISE WARNING 'SKIPPED: % duplicate fingerprints exist in transactions. Resolve duplicates before re-running migration to add the unique constraint.', dup_count;
+  ELSE
+    ALTER TABLE transactions DROP CONSTRAINT IF EXISTS uq_trans_fingerprint;
     ALTER TABLE transactions ADD CONSTRAINT uq_trans_fingerprint UNIQUE (fingerprint);
   END IF;
 END $$;
@@ -88,9 +103,7 @@ CREATE INDEX IF NOT EXISTS idx_import_history_account ON import_history(account_
 CREATE INDEX IF NOT EXISTS idx_import_history_date ON import_history(import_date DESC);
 
 -- ============================================================================
--- 4. FOREIGN KEYS (type-safe: checks column type before adding)
---    ON DELETE RESTRICT:  cannot accidentally cascade-delete financial data
---    ON DELETE SET NULL:  removing a profile or import record does not delete transactions
+-- 4. FOREIGN KEYS (type-safe)
 -- ============================================================================
 
 DO $$
@@ -106,7 +119,6 @@ BEGIN
   SELECT data_type INTO trans_imp_type FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = 'import_history' AND column_name = 'id';
 
-  -- import_history.account_id → accounts.id (RESTRICT: cannot delete account with import history)
   IF acc_id_type IS NOT NULL AND EXISTS (
     SELECT 1 FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = 'import_history' AND column_name = 'account_id'
@@ -116,7 +128,6 @@ BEGIN
       FOREIGN KEY (account_id) REFERENCES accounts(id) ON DELETE RESTRICT;
   END IF;
 
-  -- import_history.profile_id → import_profiles.id (SET NULL: deleting profile nullifies reference)
   IF imp_id_type IS NOT NULL AND EXISTS (
     SELECT 1 FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = 'import_history' AND column_name = 'profile_id'
@@ -126,7 +137,6 @@ BEGIN
       FOREIGN KEY (profile_id) REFERENCES import_profiles(id) ON DELETE SET NULL;
   END IF;
 
-  -- transactions.import_id → import_history.id (SET NULL: deleting import history leaves transactions intact)
   IF trans_imp_type IS NOT NULL AND EXISTS (
     SELECT 1 FROM information_schema.columns
     WHERE table_schema = 'public' AND table_name = 'transactions' AND column_name = 'import_id'
@@ -138,11 +148,9 @@ BEGIN
 END $$;
 
 -- ============================================================================
--- 5. ROW-LEVEL SECURITY — every Financial Center table (table-existence guarded)
---    Each block is wrapped in DO ... IF EXISTS so missing legacy tables don't fail.
+-- 5. ROW-LEVEL SECURITY — TO authenticated belt-and-suspenders + fc_members gate
 -- ============================================================================
 
--- Helper: applies policies to a table if it exists
 CREATE OR REPLACE FUNCTION fc_apply_rls(target_table text) RETURNS void AS $$
 BEGIN
   IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = target_table) THEN
@@ -161,22 +169,22 @@ BEGIN
 
   IF operation = 'SELECT' THEN
     EXECUTE format(
-      'CREATE POLICY %I ON %I FOR SELECT USING (EXISTS (SELECT 1 FROM fc_members WHERE fc_members.user_id = auth.uid()))',
+      'CREATE POLICY %I ON %I FOR SELECT TO authenticated USING (EXISTS (SELECT 1 FROM fc_members WHERE fc_members.user_id = auth.uid()))',
       policy_name, target_table
     );
   ELSIF operation = 'INSERT' THEN
     EXECUTE format(
-      'CREATE POLICY %I ON %I FOR INSERT WITH CHECK (EXISTS (SELECT 1 FROM fc_members WHERE fc_members.user_id = auth.uid()))',
+      'CREATE POLICY %I ON %I FOR INSERT TO authenticated WITH CHECK (EXISTS (SELECT 1 FROM fc_members WHERE fc_members.user_id = auth.uid()))',
       policy_name, target_table
     );
   ELSIF operation = 'UPDATE' THEN
     EXECUTE format(
-      'CREATE POLICY %I ON %I FOR UPDATE USING (EXISTS (SELECT 1 FROM fc_members WHERE fc_members.user_id = auth.uid())) WITH CHECK (EXISTS (SELECT 1 FROM fc_members WHERE fc_members.user_id = auth.uid()))',
+      'CREATE POLICY %I ON %I FOR UPDATE TO authenticated USING (EXISTS (SELECT 1 FROM fc_members WHERE fc_members.user_id = auth.uid())) WITH CHECK (EXISTS (SELECT 1 FROM fc_members WHERE fc_members.user_id = auth.uid()))',
       policy_name, target_table
     );
   ELSIF operation = 'DELETE' THEN
     EXECUTE format(
-      'CREATE POLICY %I ON %I FOR DELETE USING (EXISTS (SELECT 1 FROM fc_members WHERE fc_members.user_id = auth.uid()))',
+      'CREATE POLICY %I ON %I FOR DELETE TO authenticated USING (EXISTS (SELECT 1 FROM fc_members WHERE fc_members.user_id = auth.uid()))',
       policy_name, target_table
     );
   END IF;
@@ -217,26 +225,147 @@ SELECT fc_create_policy(t, 'FC members can delete ' || t, 'DELETE')
     'reconciliations','import_history','import_profiles'
   ]) t;
 
--- Cleanup functions (no longer needed after policy creation)
+-- Cleanup helper functions
 DROP FUNCTION IF EXISTS fc_apply_rls(text);
 DROP FUNCTION IF EXISTS fc_create_policy(text, text, text);
 
 -- ============================================================================
--- 6. ENROLLMENT (run manually in Supabase Dashboard SQL Editor)
+-- 6. ATOMIC IMPORT RPC — single database transaction for the entire import
+--    Creates history, inserts all accepted rows, records counts, all-or-nothing.
 -- ============================================================================
--- Find Phil and Crystal's UUIDs in Supabase Dashboard → Authentication → Users
--- Then:
---   INSERT INTO fc_members (user_id, role) VALUES ('<phil-uuid>', 'owner');
---   INSERT INTO fc_members (user_id, role) VALUES ('<crystal-uuid>', 'owner');
--- No browser-client policy allows INSERT on fc_members — dashboard/service_role only.
+
+CREATE OR REPLACE FUNCTION fc_import_transactions(
+  p_account_id  bigint,
+  p_filename    text,
+  p_transactions jsonb
+) RETURNS jsonb
+LANGUAGE plpgsql
+SECURITY INVOKER
+AS $$
+DECLARE
+  v_hist_id     bigint;
+  v_total_rows  integer;
+  v_imported    integer := 0;
+  v_duplicates  integer := 0;
+  v_review      integer := 0;
+  v_row         jsonb;
+  v_fingerprint text;
+  v_review_stat text;
+  v_category_id bigint;
+  v_subcategory_id bigint;
+  result        jsonb;
+BEGIN
+  v_total_rows := jsonb_array_length(p_transactions);
+
+  IF v_total_rows = 0 THEN
+    RETURN jsonb_build_object(
+      'success', true,
+      'import_id', null,
+      'imported_count', 0,
+      'duplicate_count', 0,
+      'review_required_count', 0
+    );
+  END IF;
+
+  -- 1. Create import history record
+  INSERT INTO import_history (filename, account_id, total_rows, new_count, duplicate_count, status)
+  VALUES (p_filename, p_account_id, v_total_rows, 0, 0, 'in_progress')
+  RETURNING id INTO v_hist_id;
+
+  -- 2. Insert each accepted transaction
+  FOR v_row IN SELECT * FROM jsonb_array_elements(p_transactions)
+  LOOP
+    v_fingerprint := v_row ->> 'fingerprint';
+
+    -- Skip if fingerprint already exists (duplicate)
+    IF v_fingerprint IS NOT NULL AND EXISTS (
+      SELECT 1 FROM transactions WHERE fingerprint = v_fingerprint
+    ) THEN
+      v_duplicates := v_duplicates + 1;
+      CONTINUE;
+    END IF;
+
+    -- Determine review status and category
+    IF (v_row ->> 'confidence')::numeric >= 0.7
+       AND v_row ->> 'suggested_category_id' IS NOT NULL
+    THEN
+      v_review_stat := 'approved';
+      v_category_id := (v_row ->> 'suggested_category_id')::bigint;
+      v_subcategory_id := NULLIF(v_row ->> 'suggested_subcategory_id', '')::bigint;
+    ELSE
+      v_review_stat := 'pending_review';
+      v_category_id := NULL;
+      v_subcategory_id := NULL;
+    END IF;
+
+    INSERT INTO transactions (
+      account_id, date, payee, original_description, amount,
+      transaction_type, category_id, subcategory_id,
+      review_status, cleared_status, import_id, fingerprint
+    ) VALUES (
+      p_account_id,
+      COALESCE(v_row ->> 'date', current_date::text),
+      (v_row ->> 'payee'),
+      COALESCE(v_row ->> 'original_description', v_row ->> 'payee'),
+      (v_row ->> 'amount')::numeric,
+      COALESCE(v_row ->> 'transaction_type',
+        CASE WHEN (v_row ->> 'amount')::numeric >= 0 THEN 'income' ELSE 'expense' END),
+      v_category_id,
+      v_subcategory_id,
+      v_review_stat,
+      'uncleared',
+      v_hist_id,
+      v_fingerprint
+    );
+
+    v_imported := v_imported + 1;
+    IF v_review_stat = 'pending_review' THEN
+      v_review := v_review + 1;
+    END IF;
+  END LOOP;
+
+  -- 3. Update import history with final counts
+  UPDATE import_history
+  SET new_count = v_imported,
+      duplicate_count = v_duplicates,
+      review_required_count = v_review,
+      status = 'completed'
+  WHERE id = v_hist_id;
+
+  -- 4. Recalculate account balance
+  UPDATE accounts
+  SET current_balance = (
+    SELECT COALESCE(opening_balance, 0) + COALESCE(
+      (SELECT sum(amount) FROM transactions
+       WHERE account_id = p_account_id AND review_status = 'approved'), 0
+    )
+  )
+  WHERE id = p_account_id;
+
+  result := jsonb_build_object(
+    'success', true,
+    'import_id', v_hist_id,
+    'imported_count', v_imported,
+    'duplicate_count', v_duplicates,
+    'review_required_count', v_review
+  );
+
+  RETURN result;
+
+EXCEPTION WHEN OTHERS THEN
+  -- The entire function runs in a single implicit transaction.
+  -- Any error rolls back ALL changes (history + transactions + balance).
+  RAISE;
+END $$;
 
 -- ============================================================================
--- 7. VERIFICATION (run after migration + enrollment)
+-- 7. ENROLLMENT (run manually in Supabase Dashboard SQL Editor)
 -- ============================================================================
--- RLS-enabled tables:
---   SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND rowsecurity = true ORDER BY tablename;
--- Policies summary:
---   SELECT tablename, policyname, cmd FROM pg_policies WHERE schemaname = 'public' ORDER BY tablename, cmd;
--- Foreign keys:
---   SELECT conname, conrelid::regclass AS tbl, confrelid::regclass AS ref_tbl, confupdtype, confdeltype
---   FROM pg_constraint WHERE contype = 'f' AND conrelid::regclass::text LIKE 'import_%' OR conrelid::regclass::text = 'transactions';
+--   INSERT INTO fc_members (user_id, role) VALUES ('<phil-uuid>', 'owner');
+--   INSERT INTO fc_members (user_id, role) VALUES ('<crystal-uuid>', 'owner');
+
+-- ============================================================================
+-- 8. VERIFICATION QUERIES
+-- ============================================================================
+--   SELECT tablename FROM pg_tables WHERE schemaname = 'public' AND rowsecurity = true;
+--   SELECT tablename, policyname, cmd, roles FROM pg_policies WHERE schemaname = 'public' ORDER BY tablename, cmd;
