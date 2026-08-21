@@ -287,7 +287,29 @@ BEGIN
 END $$;
 
 -- ================================================================
--- Test 7: Balance recalculation after import
+-- Test 7: Non-existent account raises exception
+-- ================================================================
+\echo ''
+\echo '--- Test 7: Non-existent account ---'
+
+DO $$
+DECLARE
+  result jsonb;
+BEGIN
+  BEGIN
+    result := fc_import_transactions(999999, 'bad_account.csv', '[{"date":"2026-01-01","payee":"Test","amount":-1.00,"transaction_type":"expense","suggested_category_id":null,"confidence":0,"fingerprint":"fp-bad-acct|1"}]'::jsonb);
+    RAISE EXCEPTION 'FAIL: RPC should have thrown for non-existent account';
+  EXCEPTION WHEN OTHERS THEN
+    IF SQLERRM ILIKE '%does not exist%' THEN
+      RAISE NOTICE 'PASS: non-existent account correctly rejected: %', SQLERRM;
+    ELSE
+      RAISE EXCEPTION 'FAIL: wrong error for non-existent account: %', SQLERRM;
+    END IF;
+  END;
+END $$;
+
+-- ================================================================
+-- Test 8: Balance recalculation after import
 -- ================================================================
 \echo ''
 \echo '--- Test 7: Balance after import ---'
@@ -314,5 +336,5 @@ END $$;
 
 \echo ''
 \echo '========================================'
-\echo '  ALL ATOMIC RPC IMPORT TESTS COMPLETED'
+\echo '  ALL ATOMIC RPC IMPORT TESTS COMPLETED (1-8)'
 \echo '========================================'

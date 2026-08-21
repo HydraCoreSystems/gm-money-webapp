@@ -1,85 +1,113 @@
 ﻿#!/bin/bash
 # ================================================================
-# True Concurrent Import Test Runner
-# Uses pg_advisory_lock to synchronize two independent psql sessions.
-# Session 1 imports first, Session 2 waits for lock release, then re-imports.
+# True Concurrent Import Test — two simultaneous RPC sessions
+# Uses FOR UPDATE account-row lock for serialization.
+# Both sessions fire RPC calls in parallel; the lock guarantees
+# exactly one set of inserts wins and the second session sees duplicates.
+# Exits nonzero on any failure.
 # ================================================================
 
-set -e
+set -euo pipefail
 
 CONTAINER="gm_fc_test_pg"
-PSQL="docker exec -i $CONTAINER psql -U postgres -d gm_test -v ON_ERROR_STOP=1"
+PSQL="docker exec -i $CONTAINER psql -U postgres -d gm_test -v ON_ERROR_STOP=1 -t -A"
+
+RESULT_DIR=$(mktemp -d)
+trap "rm -rf $RESULT_DIR" EXIT
 
 echo "=== CONCURRENT IMPORT RACE TEST ==="
 
-# Clean up any old lock
-$PSQL -c "SELECT pg_advisory_unlock(99999);" 2>/dev/null || true
+# Clean state
+echo "Resetting test data..."
+echo "DELETE FROM transactions; DELETE FROM import_history; UPDATE accounts SET current_balance = opening_balance WHERE type = 'checking';" | docker exec -i $CONTAINER psql -U postgres -d gm_test >/dev/null 2>&1
 
-# Acquire the lock first — both sessions will wait on it
-$PSQL -c "SELECT pg_advisory_lock(99999);" &
-LOCK_PID=$!
-sleep 0.5
+ACC_ID=$($PSQL -c "SELECT id FROM accounts WHERE type = 'checking' LIMIT 1;")
+if [ -z "$ACC_ID" ]; then echo "FAIL: no account"; exit 1; fi
+echo "Account ID: $ACC_ID"
 
-# Session 2: will wait for lock, then re-import
-(
-  echo "SELECT set_config('fc_test.user_id', '11111111-1111-1111-1111-111111111111', FALSE);"
-  echo "SET ROLE fc_test_role;"
-  echo "SELECT pg_advisory_lock(99999);  -- wait for session 1 to finish"
-  echo "SELECT fc_import_transactions("
-  echo "  (SELECT id FROM accounts WHERE type = 'checking' LIMIT 1),"
-  echo "  'concurrent_real.csv',"
-  echo "  '[\"fp-conc-real|1\",\"fp-conc-real|2\",\"fp-conc-real|3\"]'::jsonb"
-  echo ") AS s2_result;"
-  echo "SELECT pg_advisory_unlock(99999);"
-) | docker exec -i $CONTAINER psql -U postgres -d gm_test -t > /tmp/s2_output.txt 2>&1 &
-S2_PID=$!
-sleep 0.5
+# Import payload: same JSON for both sessions
+PAYLOAD='[{"date":"2026-08-23","payee":"ConcA1","amount":-10,"transaction_type":"expense","suggested_category_id":1,"confidence":0.95,"fingerprint":"fp-conc-real|1"},{"date":"2026-08-23","payee":"ConcA2","amount":-20,"transaction_type":"expense","suggested_category_id":1,"confidence":0.95,"fingerprint":"fp-conc-real|2"},{"date":"2026-08-23","payee":"ConcA3","amount":-30,"transaction_type":"expense","suggested_category_id":1,"confidence":0.95,"fingerprint":"fp-conc-real|3"}]'
 
-# Session 1: first import (has the lock — wait briefly then release after import)
-(
-  echo "SELECT set_config('fc_test.user_id', '11111111-1111-1111-1111-111111111111', FALSE);"
-  echo "SET ROLE fc_test_role;"
-  echo "SELECT fc_import_transactions("
-  echo "  (SELECT id FROM accounts WHERE type = 'checking' LIMIT 1),"
-  echo "  'concurrent_real.csv',"
-  echo "  '["
-  echo "    {\"date\":\"2026-08-23\",\"payee\":\"ConcA1\",\"amount\":-10,\"transaction_type\":\"expense\",\"suggested_category_id\":1,\"confidence\":0.95,\"fingerprint\":\"fp-conc-real|1\"},"
-  echo "    {\"date\":\"2026-08-23\",\"payee\":\"ConcA2\",\"amount\":-20,\"transaction_type\":\"expense\",\"suggested_category_id\":1,\"confidence\":0.95,\"fingerprint\":\"fp-conc-real|2\"},"
-  echo "    {\"date\":\"2026-08-23\",\"payee\":\"ConcA3\",\"amount\":-30,\"transaction_type\":\"expense\",\"suggested_category_id\":1,\"confidence\":0.95,\"fingerprint\":\"fp-conc-real|3\"}"
-  echo "  ]'::jsonb"
-  echo ") AS s1_result;"
-  echo "SELECT pg_advisory_unlock(99999);"
-) | docker exec -i $CONTAINER psql -U postgres -d gm_test -t > /tmp/s1_output.txt 2>&1 &
-S1_PID=$!
+# Both sessions call the RPC simultaneously.
+# The FOR UPDATE lock serializes them — one inserts, the other sees ON CONFLICT duplicates.
+run_session() {
+  local SESSION_ID=$1
+  local SESSION_SET="11111111-1111-1111-1111-111111111111"  # Phil
 
-# Wait for both sessions
-wait $S1_PID 2>/dev/null || true
-wait $S2_PID 2>/dev/null || true
-wait $LOCK_PID 2>/dev/null || true
+  echo "SELECT set_config('fc_test.user_id', '$SESSION_SET', FALSE); SET ROLE fc_test_role; SELECT fc_import_transactions($ACC_ID, 'concurrent_real.csv', '$PAYLOAD'::jsonb);" \
+    | docker exec -i $CONTAINER psql -U postgres -d gm_test -t -A > "$RESULT_DIR/session_${SESSION_ID}.txt" 2>&1
+  echo $? > "$RESULT_DIR/session_${SESSION_ID}.exit"
+}
+
+echo "Firing both sessions simultaneously..."
+run_session 1 &
+PID1=$!
+run_session 2 &
+PID2=$!
+
+# Wait for both
+wait $PID1
+EXIT1=$(cat "$RESULT_DIR/session_1.exit")
+wait $PID2
+EXIT2=$(cat "$RESULT_DIR/session_2.exit")
 
 echo ""
 echo "--- Session 1 output ---"
-cat /tmp/s1_output.txt 2>/dev/null || echo "(empty)"
-echo ""
+cat "$RESULT_DIR/session_1.txt"
 echo "--- Session 2 output ---"
-cat /tmp/s2_output.txt 2>/dev/null || echo "(empty)"
+cat "$RESULT_DIR/session_2.txt"
 
-# Verify: Session 1 imported 3, Session 2 saw 3 duplicates
-S1_IMPORTED=$(grep -o '"imported_count": [0-9]*' /tmp/s1_output.txt 2>/dev/null | head -1 | awk '{print $2}' || echo "?")
-S2_DUPS=$(grep -o '"duplicate_count": [0-9]*' /tmp/s2_output.txt 2>/dev/null | head -1 | awk '{print $2}' || echo "?")
+# Check both sessions exited cleanly
+if [ "$EXIT1" != "0" ]; then echo "FAIL: Session 1 exited with code $EXIT1"; exit 1; fi
+if [ "$EXIT2" != "0" ]; then echo "FAIL: Session 2 exited with code $EXIT2"; exit 1; fi
 
-echo ""
-if [ "$S1_IMPORTED" = "3" ]; then
-  echo "PASS: Session 1 imported 3 ($S1_IMPORTED)"
-else
-  echo "FAIL: Session 1 imported $S1_IMPORTED (expected 3)"
-fi
+# Parse results
+S1_IMPORTED=$(grep -o '"imported_count":[0-9]*' "$RESULT_DIR/session_1.txt" | head -1 | grep -o '[0-9]*' || echo "0")
+S1_DUPS=$(grep -o '"duplicate_count":[0-9]*' "$RESULT_DIR/session_1.txt" | head -1 | grep -o '[0-9]*' || echo "0")
+S2_IMPORTED=$(grep -o '"imported_count":[0-9]*' "$RESULT_DIR/session_2.txt" | head -1 | grep -o '[0-9]*' || echo "0")
+S2_DUPS=$(grep -o '"duplicate_count":[0-9]*' "$RESULT_DIR/session_2.txt" | head -1 | grep -o '[0-9]*' || echo "0")
 
-if [ "$S2_DUPS" = "3" ]; then
-  echo "PASS: Session 2 saw 3 duplicates ($S2_DUPS)"
-else
-  echo "FAIL: Session 2 had $S2_DUPS duplicates (expected 3)"
-fi
+# One session imported 3, the other saw 3 duplicates (ON CONFLICT)
+TOTAL_IMPORTED=$((S1_IMPORTED + S2_IMPORTED))
+TOTAL_DUPS=$((S1_DUPS + S2_DUPS))
 
 echo ""
-echo "=== CONCURRENT TEST COMPLETE ==="
+if [ "$TOTAL_IMPORTED" = "3" ] && [ "$TOTAL_DUPS" = "3" ]; then
+  echo "PASS: exactly 3 imported + 3 duplicates (one session won, one saw conflicts)"
+else
+  echo "FAIL: $TOTAL_IMPORTED imported + $TOTAL_DUPS duplicates (expected 3+3)"
+  exit 1
+fi
+
+# Verify database state
+TOTAL_ROWS=$($PSQL -c "SELECT count(*) FROM transactions;")
+UNIQUE_FP=$($PSQL -c "SELECT count(DISTINCT fingerprint) FROM transactions WHERE fingerprint IS NOT NULL;")
+IN_PROGRESS=$($PSQL -c "SELECT count(*) FROM import_history WHERE status = 'in_progress';")
+BALANCE=$($PSQL -c "SELECT current_balance FROM accounts WHERE id = $ACC_ID;")
+
+echo "DB state: $TOTAL_ROWS rows, $UNIQUE_FP unique fingerprints, $IN_PROGRESS in_progress history, balance=$BALANCE"
+
+if [ "$TOTAL_ROWS" != "$UNIQUE_FP" ]; then
+  echo "FAIL: row count ($TOTAL_ROWS) != unique fingerprints ($UNIQUE_FP)"
+  exit 1
+fi
+
+if [ "$IN_PROGRESS" != "0" ]; then
+  echo "FAIL: $IN_PROGRESS in_progress history rows remain"
+  exit 1
+fi
+
+# Retry: importing again should produce 0 new rows
+echo ""
+echo "--- Retry after both sessions ---"
+RETRY_OUT=$($PSQL -c "SELECT set_config('fc_test.user_id', '11111111-1111-1111-1111-111111111111', FALSE); SET ROLE fc_test_role; SELECT fc_import_transactions($ACC_ID, 'retry.csv', '$PAYLOAD'::jsonb);")
+RETRY_DUPS=$(echo "$RETRY_OUT" | grep -o '"duplicate_count":[0-9]*' | grep -o '[0-9]*' || echo "0")
+if [ "$RETRY_DUPS" = "3" ]; then
+  echo "PASS: retry after both sessions saw 3 duplicates (idempotent)"
+else
+  echo "FAIL: retry had $RETRY_DUPS duplicates (expected 3)"
+  exit 1
+fi
+
+echo ""
+echo "=== CONCURRENT IMPORT RACE TEST PASSED ==="

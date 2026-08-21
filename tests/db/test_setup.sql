@@ -178,3 +178,34 @@ INSERT INTO categories (name, type) VALUES
   ('Software', 'expense'),
   ('Income', 'income')
 ON CONFLICT DO NOTHING;
+
+-- ================================================================
+-- Test role infrastructure: authenticated, anon, fc_test_role
+-- ================================================================
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'authenticated') THEN
+    CREATE ROLE authenticated;
+  END IF;
+END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    CREATE ROLE anon;
+  END IF;
+END $$;
+
+DO $$ BEGIN
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'fc_test_role') THEN
+    CREATE ROLE fc_test_role WITH LOGIN PASSWORD 'testpass';
+  END IF;
+END $$;
+
+GRANT authenticated TO fc_test_role;
+
+-- fc_test_role needs schema access and table privileges for RLS testing
+GRANT USAGE ON SCHEMA public TO fc_test_role;
+GRANT USAGE ON SCHEMA auth TO fc_test_role;
+GRANT SELECT ON auth.users TO fc_test_role;
+GRANT ALL ON ALL TABLES IN SCHEMA public TO fc_test_role;
+GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO fc_test_role;

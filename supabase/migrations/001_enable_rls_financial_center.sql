@@ -281,8 +281,11 @@ BEGIN
     );
   END IF;
 
-  -- 1. Lock account row (fails if account does not exist)
+  -- 1. Lock account row and verify it exists
   PERFORM id FROM accounts WHERE id = p_account_id FOR UPDATE;
+  IF NOT FOUND THEN
+    RAISE EXCEPTION 'Account % does not exist.', p_account_id;
+  END IF;
 
   -- 2. Validate every fingerprint before writing anything
   FOR v_row IN SELECT * FROM jsonb_array_elements(p_transactions)
@@ -397,7 +400,52 @@ BEGIN
 END $$;
 
 -- ============================================================================
--- 7. ENROLLMENT (run manually in Supabase Dashboard SQL Editor)
+-- 7. DATA API PRIVILEGES
+--    authenticated: minimum required for app (RLS + fc_members gates access)
+--    anon / PUBLIC: no access to FC tables or sequences
+-- ============================================================================
+
+DO $$
+DECLARE
+  tbl text;
+BEGIN
+  FOREACH tbl IN ARRAY ARRAY[
+    'accounts','categories','subcategories','transactions','merchant_memory',
+    'scheduled_transactions','transaction_splits','transaction_attachments',
+    'reconciliations','import_history','import_profiles'
+  ] LOOP
+    IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = tbl) THEN
+      -- Allow authenticated to use these tables (RLS gates actual row access)
+      EXECUTE format('GRANT SELECT, INSERT, UPDATE, DELETE ON %I TO authenticated', tbl);
+      -- Deny anon completely
+      IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+        EXECUTE format('REVOKE ALL ON %I FROM anon', tbl);
+      END IF;
+      -- Deny PUBLIC completely
+      EXECUTE format('REVOKE ALL ON %I FROM PUBLIC', tbl);
+    END IF;
+  END LOOP;
+
+  -- Also revoke on fc_members (already has no client policies, this is belt-and-suspenders)
+  IF EXISTS (SELECT 1 FROM information_schema.tables WHERE table_schema = 'public' AND table_name = 'fc_members') THEN
+    GRANT SELECT ON fc_members TO authenticated;
+    REVOKE INSERT, UPDATE, DELETE ON fc_members FROM authenticated;
+    IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+      REVOKE ALL ON fc_members FROM anon;
+    END IF;
+    REVOKE ALL ON fc_members FROM PUBLIC;
+  END IF;
+
+  -- Sequence usage for identity columns
+  EXECUTE 'GRANT USAGE ON ALL SEQUENCES IN SCHEMA public TO authenticated';
+  IF EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'anon') THEN
+    EXECUTE 'REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM anon';
+  END IF;
+  EXECUTE 'REVOKE ALL ON ALL SEQUENCES IN SCHEMA public FROM PUBLIC';
+END $$;
+
+-- ============================================================================
+-- 8. ENROLLMENT (run manually in Supabase Dashboard SQL Editor)
 -- ============================================================================
 --   INSERT INTO fc_members (user_id, role) VALUES ('<phil-uuid>', 'owner');
 --   INSERT INTO fc_members (user_id, role) VALUES ('<crystal-uuid>', 'owner');
