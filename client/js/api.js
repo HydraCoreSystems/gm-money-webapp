@@ -65,16 +65,22 @@ function parseCSV(text) {
 }
 
 export const api = {
-  // 1. Accounts
+  // 1. Accounts (Checking always first)
   async getAccounts() {
-    const { data, error } = await supabase.from('accounts').select('*').order('type').order('name');
+    const { data, error } = await supabase.from('accounts').select('*').order('created_at', { ascending: true });
     if (error) throw error;
+
     const formatted = (data || []).map(a => ({
       ...a,
       institution: a.institution === 'Chase' ? 'PNC Bank' : (a.institution || 'PNC Bank'),
       opening_balance: safeFloat(a.opening_balance),
       current_balance: safeFloat(a.current_balance)
-    }));
+    })).sort((a, b) => {
+      if (a.type === 'checking') return -1;
+      if (b.type === 'checking') return 1;
+      return a.name.localeCompare(b.name);
+    });
+
     return { success: true, accounts: formatted };
   },
 
@@ -326,7 +332,6 @@ export const api = {
     allLines.forEach(row => {
       if (!row || row.length < 2) return;
 
-      // 1. Locate Date Cell
       let formattedDate = null;
       let dateColIdx = -1;
 
@@ -346,7 +351,6 @@ export const api = {
 
       if (!formattedDate) return;
 
-      // 2. Locate Description / Payee Cell
       let rawDesc = '';
       let descColIdx = -1;
 
@@ -360,7 +364,6 @@ export const api = {
       }
       if (!rawDesc) rawDesc = 'Bank Transaction';
 
-      // 3. Extract Number Cells
       const foundNumbers = [];
       for (let i = 0; i < row.length; i++) {
         if (i === dateColIdx || i === descColIdx) continue;
@@ -437,9 +440,13 @@ export const api = {
   async processImport({ accountId, transactions }) {
     let accId = parseInt(accountId, 10);
     if (isNaN(accId)) {
-      const { data: accs } = await supabase.from('accounts').select('id').limit(1);
+      const { data: accs } = await supabase.from('accounts').select('id').eq('type', 'checking').limit(1);
       if (accs && accs[0]) accId = accs[0].id;
-      else throw new Error('Please create at least one account under Accounts before importing');
+      else {
+        const { data: anyAcc } = await supabase.from('accounts').select('id').limit(1);
+        if (anyAcc && anyAcc[0]) accId = anyAcc[0].id;
+        else throw new Error('Please create at least one account under Accounts before importing');
+      }
     }
 
     // Automatically remove any old $0.00 placeholder transactions from database
@@ -823,10 +830,8 @@ export const api = {
     return { success: true };
   },
 
-  // 10. Backups, Reset & Balance Engine
-  async listBackups() {
-    return { success: true, backups: [] };
-  },
+  // 10. Backups & Reset
+  async listBackups() { return { success: true, backups: [] }; },
 
   async createBackupSnapshot() {
     const [accs, cats, subs, trans, sch, rules] = await Promise.all([
