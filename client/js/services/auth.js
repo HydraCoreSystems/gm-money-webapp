@@ -49,6 +49,52 @@ export const auth = {
   },
 
   /**
+   * Update password for the currently signed-in user.
+   */
+  async updatePassword(newPassword) {
+    if (!newPassword || newPassword.length < 6) {
+      throw new Error('Password must be at least 6 characters long.');
+    }
+    const { data, error } = await supabase.auth.updateUser({
+      password: newPassword
+    });
+    if (error) throw error;
+    return data;
+  },
+
+  /**
+   * Update user metadata (such as display name).
+   */
+  async updateProfile(metadata) {
+    const { data, error } = await supabase.auth.updateUser({
+      data: metadata
+    });
+    if (error) throw error;
+    return data;
+  },
+
+  /**
+   * Send a password reset email.
+   */
+  async resetPasswordForEmail(email) {
+    const cleanEmail = email.trim().toLowerCase();
+    const { data, error } = await supabase.auth.resetPasswordForEmail(cleanEmail, {
+      redirectTo: window.location.origin
+    });
+    if (error) throw error;
+    return data;
+  },
+
+  /**
+   * Fetch enrolled members from fc_members.
+   */
+  async getMembers() {
+    const { data, error } = await supabase.from('fc_members').select('*');
+    if (error) return [];
+    return data || [];
+  },
+
+  /**
    * Listen for auth state changes.
    */
   onAuthStateChange(callback) {

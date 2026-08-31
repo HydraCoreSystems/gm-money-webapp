@@ -97,9 +97,12 @@ class App {
                 />
               </div>
               <div>
-                <label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-muted, #8b949e); margin-bottom: 6px;">
-                  Password
-                </label>
+                <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 6px;">
+                  <label style="font-size: 12px; font-weight: 600; color: var(--text-muted, #8b949e);">
+                    Password
+                  </label>
+                  <a href="#" id="forgot-password-link" style="font-size: 11px; color: var(--accent-gold, #d29922); text-decoration: none;">Forgot password?</a>
+                </div>
                 <input
                   type="password"
                   id="login-password"
@@ -165,6 +168,34 @@ class App {
           window.location.reload();
         } catch (err) {
           errorDiv.textContent = err.message || 'Authentication failed. Please try again.';
+          errorDiv.style.display = 'block';
+        }
+      });
+
+      document.getElementById('forgot-password-link')?.addEventListener('click', async (e) => {
+        e.preventDefault();
+        const email = document.getElementById('login-email')?.value?.trim();
+        if (!email) {
+          errorDiv.style.background = 'rgba(245, 101, 101, 0.15)';
+          errorDiv.style.borderColor = 'rgba(245, 101, 101, 0.4)';
+          errorDiv.style.color = '#fca5a5';
+          errorDiv.textContent = 'Please type your email in the box above, then click "Forgot password?".';
+          errorDiv.style.display = 'block';
+          return;
+        }
+
+        try {
+          await auth.resetPasswordForEmail(email);
+          errorDiv.style.background = 'rgba(56, 161, 105, 0.15)';
+          errorDiv.style.borderColor = 'rgba(56, 161, 105, 0.4)';
+          errorDiv.style.color = '#68d391';
+          errorDiv.textContent = `Password reset link sent to ${email}! Check your inbox.`;
+          errorDiv.style.display = 'block';
+        } catch (err) {
+          errorDiv.style.background = 'rgba(245, 101, 101, 0.15)';
+          errorDiv.style.borderColor = 'rgba(245, 101, 101, 0.4)';
+          errorDiv.style.color = '#fca5a5';
+          errorDiv.textContent = 'Failed to send reset email: ' + err.message;
           errorDiv.style.display = 'block';
         }
       });
