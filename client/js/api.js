@@ -1071,5 +1071,177 @@ export const api = {
       await supabase.from('accounts').update({ current_balance: a.opening_balance == null ? 0 : safeFloat(a.opening_balance) }).eq('id', a.id);
     }
     return { success: true };
+  },
+
+  // ================================================================
+  // 10. Bank Feed (SimpleFIN Bridge)
+  // ================================================================
+  async syncBankFeed(days = 7) {
+    let feedData = null;
+
+    // 1. Fetch normalized feed data from serverless /api/bank-feed
+    try {
+      const res = await fetch('/api/bank-feed', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ days })
+      });
+      if (res.ok) {
+        feedData = await res.json();
+      }
+    } catch (err) {
+      console.warn('Direct /api/bank-feed fetch failed, trying /api/bank-feed/sync:', err);
+    }
+
+    // Fallback to local server endpoint if needed
+    if (!feedData || !feedData.success) {
+      try {
+        const res2 = await fetch('/api/bank-feed/sync', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ days })
+        });
+        if (res2.ok) {
+          const localResult = await res2.json();
+          if (localResult.success) return localResult;
+        }
+      } catch (err2) {
+        console.warn('Fallback sync failed:', err2);
+      }
+    }
+
+    if (!feedData || !feedData.success) {
+      return { success: false, error: feedData?.error || 'Unable to retrieve bank feed from SimpleFIN.' };
+    }
+
+    // 2. Fetch existing accounts from Supabase to match or create them
+    const { data: accounts, error: accError } = await supabase.from('accounts').select('*');
+    if (accError) {
+      // If running without active Supabase session
+      return { success: false, error: 'Database access error: ' + accError.message };
+    }
+
+    let totalImported = 0;
+    let totalDuplicates = 0;
+    const accountSummaries = [];
+
+    for (const sfinAcc of (feedData.accounts || [])) {
+      const sfinName = sfinAcc.name || '';
+      let targetAccount = null;
+
+      // Check number match (e.g. 5681 or 1354)
+      const numMatch = sfinName.match(/\b(\d{4})\b/);
+      if (numMatch) {
+        targetAccount = accounts.find(a => (a.name || '').includes(numMatch[1]));
+      }
+
+      // Check primary checking for 5681
+      if (!targetAccount && sfinName.toLowerCase().includes('checking')) {
+        targetAccount = accounts.find(a => a.type === 'checking');
+      }
+
+      // Check Spend for 1354
+      if (!targetAccount && (sfinName.toLowerCase().includes('spend') || sfinName.includes('1354'))) {
+        targetAccount = accounts.find(a => (a.name || '').toLowerCase().includes('spend') || (a.name || '').includes('1354'));
+      }
+
+      // If account doesn't exist in Supabase, create it!
+      if (!targetAccount) {
+        const newAccName = sfinName.includes('PNC') ? sfinName : `PNC Bank ${sfinName}`;
+        const newAccType = sfinName.toLowerCase().includes('savings') ? 'savings' : 'checking';
+        const { data: created, error: createErr } = await supabase.from('accounts').insert([{
+          name: newAccName,
+          institution: 'PNC Bank',
+          type: newAccType,
+          opening_balance: null,
+          current_balance: safeFloat(sfinAcc.balance),
+          notes: 'Created via SimpleFIN Bank Feed'
+        }]).select().single();
+
+        if (createErr) {
+          console.error('Failed to create account in Supabase for', sfinName, createErr);
+          continue;
+        }
+        targetAccount = created;
+      }
+
+      // Prepare transactions for atomic fc_import_transactions RPC
+      const payloadRows = (sfinAcc.transactions || []).map(t => ({
+        date: t.date,
+        amount: safeFloat(t.amount),
+        payee: t.payee,
+        original_description: t.original_description,
+        transaction_type: t.transaction_type,
+        confidence: 0,
+        suggested_category_id: null,
+        fingerprint: t.fingerprint,
+        meta: { source: 'simplefin', reference_id: t.reference_id }
+      }));
+
+      if (payloadRows.length === 0) {
+        accountSummaries.push({
+          account_id: targetAccount.id,
+          name: targetAccount.name,
+          imported: 0,
+          duplicates: 0,
+          balance: sfinAcc.balance
+        });
+        continue;
+      }
+
+      const rpcParams = {
+        p_account_id: targetAccount.id,
+        p_filename: `SimpleFIN Bank Feed (${days}d)`,
+        p_transactions: payloadRows
+      };
+
+      // If opening balance not yet established, provide statement balance
+      if (targetAccount.opening_balance === null || targetAccount.opening_balance === undefined) {
+        rpcParams.p_statement_balance = safeFloat(sfinAcc.balance);
+      }
+
+      const { data: rpcResult, error: rpcError } = await supabase.rpc('fc_import_transactions', rpcParams);
+
+      if (rpcError) {
+        console.error('RPC import error for', targetAccount.name, rpcError);
+        continue;
+      }
+
+      // Update current balance in Supabase directly
+      await supabase.from('accounts').update({
+        current_balance: safeFloat(sfinAcc.balance),
+        institution: 'PNC Bank',
+        updated_at: new Date().toISOString()
+      }).eq('id', targetAccount.id);
+
+      const imported = rpcResult?.imported_count || 0;
+      const duplicates = rpcResult?.duplicate_count || 0;
+      totalImported += imported;
+      totalDuplicates += duplicates;
+
+      accountSummaries.push({
+        account_id: targetAccount.id,
+        name: targetAccount.name,
+        imported,
+        duplicates,
+        balance: sfinAcc.balance
+      });
+    }
+
+    return {
+      success: true,
+      total_imported: totalImported,
+      total_duplicates: totalDuplicates,
+      accounts: accountSummaries
+    };
+  },
+
+  async getBankFeedStatus() {
+    try {
+      const res = await fetch('/api/bank-feed');
+      return await res.json();
+    } catch (err) {
+      return { success: false, error: err.message };
+    }
   }
 };

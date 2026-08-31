@@ -12,6 +12,7 @@ import { SchedulerService } from './services/schedulerService.js';
 import { ReconciliationService } from './services/reconciliationService.js';
 import { ReportService } from './services/reportService.js';
 import { BackupService } from './services/backupService.js';
+import { SimplefinService } from './services/simplefinService.js';
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
@@ -1276,6 +1277,48 @@ app.post('/api/backup/legacy-migration', (req, res) => {
     if (!csv_content) return res.status(400).json({ success: false, error: 'CSV content is required' });
 
     const result = BackupService.importLegacyGoogleSheets(csv_content, default_account_id);
+    res.json(result);
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+// -------------------------------------------------------------
+// 10. BANK FEED (SIMPLEFIN BRIDGE) API
+// -------------------------------------------------------------
+app.get('/api/bank-feed/status', async (req, res) => {
+  try {
+    let configured = false;
+    try {
+      SimplefinService.getAccessUrl();
+      configured = true;
+    } catch {
+      configured = false;
+    }
+
+    const lastImport = db.prepare(`
+      SELECT * FROM import_history 
+      WHERE filename LIKE '%SimpleFIN%' 
+      ORDER BY import_date DESC 
+      LIMIT 1
+    `).get();
+
+    res.json({
+      success: true,
+      configured,
+      institution: 'PNC Bank',
+      last_sync: lastImport?.import_date || null,
+      last_import: lastImport || null
+    });
+  } catch (err) {
+    res.status(500).json({ success: false, error: err.message });
+  }
+});
+
+app.post('/api/bank-feed/sync', async (req, res) => {
+  try {
+    const days = parseInt(req.body.days || req.query.days || '7', 10);
+    const result = await SimplefinService.sync({ days });
     res.json(result);
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });

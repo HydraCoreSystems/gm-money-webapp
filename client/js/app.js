@@ -43,6 +43,7 @@ class App {
     this.bindGlobalEvents();
     await this.refreshSidebarState();
     this.navigateTo('home');
+    this.checkDailyAutoSync();
   }
 
   renderLoginScreen() {
@@ -189,6 +190,40 @@ class App {
 
     document.getElementById('top-import-btn')?.addEventListener('click', () => {
       this.navigateTo('importer');
+    });
+
+    document.getElementById('top-sync-bank-btn')?.addEventListener('click', async () => {
+      const btn = document.getElementById('top-sync-bank-btn');
+      const textEl = document.getElementById('top-sync-bank-text');
+      const originalText = textEl ? textEl.textContent : 'Sync Bank Feed';
+
+      try {
+        if (btn) btn.disabled = true;
+        if (textEl) textEl.textContent = 'Syncing...';
+        showToast('Connecting to PNC Bank via SimpleFIN...', 'info');
+
+        const hasInitialSync = localStorage.getItem('gm_bank_initial_synced') === 'true';
+        const daysToSync = hasInitialSync ? 3 : 7;
+
+        const res = await api.syncBankFeed(daysToSync);
+        if (!res.success) {
+          throw new Error(res.error || 'Bank sync failed');
+        }
+
+        localStorage.setItem('gm_bank_initial_synced', 'true');
+        localStorage.setItem('gm_last_bank_sync', Date.now().toString());
+
+        const msg = `Bank Sync Complete (${daysToSync}d window): ${res.total_imported} imported, ${res.total_duplicates} duplicates skipped.`;
+        showToast(msg, 'success');
+
+        await this.refreshSidebarState();
+        this.reloadCurrentView();
+      } catch (err) {
+        showToast(err.message, 'error');
+      } finally {
+        if (btn) btn.disabled = false;
+        if (textEl) textEl.textContent = originalText;
+      }
     });
 
     document.getElementById('top-backup-btn')?.addEventListener('click', async () => {
@@ -362,6 +397,33 @@ class App {
             <button class="btn btn-primary" onclick="location.reload()">Reload App</button>
           </div>`;
       }
+    }
+  }
+
+  async checkDailyAutoSync() {
+    try {
+      const lastSyncStr = localStorage.getItem('gm_last_bank_sync');
+      const hasInitialSync = localStorage.getItem('gm_bank_initial_synced') === 'true';
+      const now = Date.now();
+      const twentyHours = 20 * 60 * 60 * 1000;
+
+      // If never synced or more than 20 hours since last sync
+      if (!lastSyncStr || (now - parseInt(lastSyncStr, 10)) > twentyHours) {
+        const days = hasInitialSync ? 3 : 7;
+        console.log(`[BankFeed] Triggering automatic bank sync (${days} days)...`);
+        const res = await api.syncBankFeed(days);
+        if (res && res.success) {
+          localStorage.setItem('gm_bank_initial_synced', 'true');
+          localStorage.setItem('gm_last_bank_sync', now.toString());
+          if (res.total_imported > 0) {
+            showToast(`Daily Bank Feed: ${res.total_imported} new transactions imported from PNC Bank.`, 'success');
+            await this.refreshSidebarState();
+            this.reloadCurrentView();
+          }
+        }
+      }
+    } catch (err) {
+      console.warn('[BankFeed] Background auto-sync skipped:', err.message);
     }
   }
 
