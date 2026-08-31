@@ -25,6 +25,12 @@ class App {
   }
 
   async init() {
+    // Check if user clicked a recovery link with #access_token=...&type=recovery
+    if (window.location.hash && window.location.hash.includes('type=recovery')) {
+      this.renderPasswordResetModal();
+      return;
+    }
+
     // Check authentication first
     const session = await auth.getSession();
 
@@ -33,10 +39,12 @@ class App {
       return;
     }
 
-    // Listen for auth state changes (logout from another tab, etc.)
+    // Listen for auth state changes (logout from another tab, recovery, etc.)
     auth.onAuthStateChange((event, session) => {
       if (event === 'SIGNED_OUT') {
         this.renderLoginScreen();
+      } else if (event === 'PASSWORD_RECOVERY') {
+        this.renderPasswordResetModal();
       }
     });
 
@@ -44,6 +52,105 @@ class App {
     await this.refreshSidebarState();
     this.navigateTo('home');
     this.checkDailyAutoSync();
+  }
+
+  renderPasswordResetModal() {
+    document.body.innerHTML = `
+      <div style="
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        background: var(--bg-primary, #0d1117);
+        font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+      ">
+        <div style="
+          background: var(--bg-surface, #161b22);
+          border: 1px solid var(--border-subtle, #30363d);
+          border-radius: 12px;
+          padding: 40px;
+          width: 100%;
+          max-width: 400px;
+        ">
+          <div style="text-align: center; margin-bottom: 24px;">
+            <h1 style="font-size: 20px; font-weight: 700; color: var(--text-main, #e6edf3); margin: 0 0 6px 0;">
+              Set Your New Password
+            </h1>
+            <span style="font-size: 13px; color: var(--text-muted, #8b949e);">Gathering Moss Financial Center</span>
+          </div>
+
+          <div id="reset-error" style="display: none; background: rgba(245,101,101,0.15); border: 1px solid rgba(245,101,101,0.4); border-radius: 8px; padding: 10px 14px; margin-bottom: 16px; font-size: 13px; color: #fca5a5;"></div>
+
+          <form id="reset-form" style="display: flex; flex-direction: column; gap: 16px;">
+            <div>
+              <label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-muted, #8b949e); margin-bottom: 6px;">
+                New Password
+              </label>
+              <input
+                type="password"
+                id="reset-new-password"
+                placeholder="Enter new password (min 6 chars)"
+                required
+                style="width: 100%; padding: 10px 12px; background: var(--bg-primary, #0d1117); border: 1px solid var(--border-subtle, #30363d); border-radius: 8px; color: var(--text-main, #e6edf3); font-size: 14px; outline: none; box-sizing: border-box;"
+              />
+            </div>
+            <div>
+              <label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-muted, #8b949e); margin-bottom: 6px;">
+                Confirm New Password
+              </label>
+              <input
+                type="password"
+                id="reset-confirm-password"
+                placeholder="Re-enter new password"
+                required
+                style="width: 100%; padding: 10px 12px; background: var(--bg-primary, #0d1117); border: 1px solid var(--border-subtle, #30363d); border-radius: 8px; color: var(--text-main, #e6edf3); font-size: 14px; outline: none; box-sizing: border-box;"
+              />
+            </div>
+            <button
+              type="submit"
+              id="reset-submit-btn"
+              style="width: 100%; padding: 11px; background: var(--moss-primary, #238636); border: none; border-radius: 8px; color: #fff; font-size: 14px; font-weight: 600; cursor: pointer; margin-top: 4px;"
+            >
+              Save Password & Log In
+            </button>
+          </form>
+        </div>
+      </div>
+    `;
+
+    const resetForm = document.getElementById('reset-form');
+    const resetError = document.getElementById('reset-error');
+    const submitBtn = document.getElementById('reset-submit-btn');
+
+    resetForm?.addEventListener('submit', async (e) => {
+      e.preventDefault();
+      const p1 = document.getElementById('reset-new-password').value;
+      const p2 = document.getElementById('reset-confirm-password').value;
+
+      if (p1.length < 6) {
+        resetError.textContent = 'Password must be at least 6 characters.';
+        resetError.style.display = 'block';
+        return;
+      }
+      if (p1 !== p2) {
+        resetError.textContent = 'Passwords do not match.';
+        resetError.style.display = 'block';
+        return;
+      }
+
+      try {
+        submitBtn.disabled = true;
+        submitBtn.textContent = 'Saving...';
+        await auth.updatePassword(p1);
+        window.history.replaceState({}, document.title, window.location.pathname);
+        window.location.reload();
+      } catch (err) {
+        resetError.textContent = err.message || 'Failed to update password.';
+        resetError.style.display = 'block';
+        submitBtn.disabled = false;
+        submitBtn.textContent = 'Save Password & Log In';
+      }
+    });
   }
 
   renderLoginScreen() {
